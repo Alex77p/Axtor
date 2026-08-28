@@ -12,7 +12,7 @@ The original Axtor/MyAiAgent source code, original assets, branding, documentati
 
 See LICENSE.md for the complete license.
 
-> **Important GitHub limitation:** A public GitHub repository can still be forked through GitHub's platform functionality. A license can prohibit unauthorized modification and redistribution, but it cannot technically prevent GitHub from offering its public-repository fork feature. If you require forks to be technically unavailable, the repository must be private. GitHub documents that public repositories can be viewed and forked even when the repository does not grant an open-source license. citeturn0search1turn0search4
+> **Important GitHub limitation:** A public GitHub repository can still be forked through GitHub's platform functionality. A license can prohibit unauthorized modification and redistribution, but it cannot technically prevent GitHub from offering its public-repository fork feature. If you require forks to be technically unavailable, the repository must be private. GitHub documents that public repositories can be viewed and forked even when the repository does not grant an open-source license.
 
 Third-party libraries and components remain subject to their own licenses.
 
@@ -31,6 +31,16 @@ The app:
 - Exports the active GGUF file and a model manifest.
 - Uses the same local model from the voice assistant when available.
 - Prefers offline Android speech recognition and keeps voice command processing local after speech recognition.
+
+## Default model
+
+A **default GGUF Llama model is provided in the GitHub Release section alongside the Axtor app APK** for users who want to get started quickly.
+
+You can use the provided default model, or **download and import your own compatible GGUF model** into Axtor. This lets you choose a model that better fits your device's RAM, storage, performance, or preferred capabilities.
+
+To use your own model, download a compatible GGUF model from a website, then use Axtor's model import option to select the downloaded file.
+
+> **Model licensing:** AI models are separate from Axtor. Before downloading or redistributing a model, check and follow the model's own license and usage terms.
 
 ## Download and import
 
