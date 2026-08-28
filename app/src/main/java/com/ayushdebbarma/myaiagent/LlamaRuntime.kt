@@ -42,7 +42,7 @@ object LlamaRuntime {
                         systemPrompt = systemPrompt,
                         maxTokens = maxTokens
                     )
-                    callback.onSuccess(result.text, result.tokensPerSecond)
+                    callback.onSuccess(result.text, result.tokensPerSecond.toDouble())
                 } finally {
                     Llama.releaseModel(model)
                 }
