@@ -2,13 +2,27 @@
 
 MyAiAgent is an offline-first Android assistant created by **Ayush Debbarma**.
 
+## License
+
+**Axtor Proprietary License 1.0**  
+**Official License ID: AXTOR-PROPRIETARY-1.0**  
+**Copyright © 2026 Ayush Debbarma. All rights reserved.**
+
+The original Axtor/MyAiAgent source code, original assets, branding, documentation, and other original materials are proprietary. No permission is granted to copy, modify, create derivative works, redistribute, sublicense, sell, or commercially use those materials without prior written permission from Ayush Debbarma.
+
+See LICENSE.md for the complete license.
+
+> **Important GitHub limitation:** A public GitHub repository can still be forked through GitHub's platform functionality. A license can prohibit unauthorized modification and redistribution, but it cannot technically prevent GitHub from offering its public-repository fork feature. If you require forks to be technically unavailable, the repository must be private. GitHub documents that public repositories can be viewed and forked even when the repository does not grant an open-source license. citeturn0search1turn0search4
+
+Third-party libraries and components remain subject to their own licenses.
+
 ## Real local GGUF inference
 
-This version integrates a real llama.cpp-based Android runtime through the Maven Central AAR `dev.ffmpegkit-maintained:llama-android:0.1.1`. The library exposes GGUF model loading and local completion APIs; no cloud API key or remote inference service is required. The AAR is arm64-v8a and CPU/NEON based in its free build. See the upstream documentation for licensing and build details.
+This version integrates a real llama.cpp-based Android runtime through the Maven Central AAR dev.ffmpegkit-maintained:llama-android:0.1.1. The library exposes GGUF model loading and local completion APIs; no cloud API key or remote inference service is required. The AAR is arm64-v8a and CPU/NEON based in its free build. See the upstream documentation for licensing and build details.
 
 The app:
 
-- Imports a `.gguf` file through Android's document picker.
+- Imports a .gguf file through Android's document picker.
 - Copies the model into app-private storage.
 - Validates the GGUF magic header.
 - Selects the imported model as the active model.
@@ -36,7 +50,7 @@ The upstream llama.cpp Android documentation also documents native NDK builds an
 
 ## Voice
 
-The voice service runs as an Android microphone foreground service and prefers offline recognition. The service recognizes wake phrases such as `Hey MyAI`, `Hey My AI`, `MyAI`, and `My AI`, then routes the command to the local model or local device-action handlers.
+The voice service runs as an Android microphone foreground service and prefers offline recognition. The service recognizes wake phrases such as Hey MyAI, Hey My AI, MyAI, and My AI, then routes the command to the local model or local device-action handlers.
 
 A true low-power hardware wake-word DSP is device-dependent; this build uses Android's speech recognizer rather than pretending to provide a universal hardware hotword engine.
 
