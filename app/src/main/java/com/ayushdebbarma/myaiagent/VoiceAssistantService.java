@@ -20,6 +20,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
 
   @Override public void onCreate(){
     super.onCreate();
+    VoiceServiceState.setRunning(true);
     NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
     if(Build.VERSION.SDK_INT>=26){
       NotificationChannel c=new NotificationChannel("voice","MyAiAgent Voice",NotificationManager.IMPORTANCE_LOW);
@@ -99,6 +100,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     running=false;
     if(recognizer!=null){recognizer.cancel();recognizer.destroy();}
     if(tts!=null){tts.stop();tts.shutdown();}
+    VoiceServiceState.setRunning(false);
     super.onDestroy();
   }
 
