@@ -22,6 +22,7 @@ object LlamaRuntime {
         fun onError(message: String)
     }
 
+    @JvmStatic
     fun generate(context: Context, modelPath: String, prompt: String, systemPrompt: String, maxTokens: Int, callback: Callback) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -52,6 +53,7 @@ object LlamaRuntime {
         }
     }
 
+    @JvmStatic
     fun copyModel(context: Context, input: InputStream, displayName: String): File {
         val dir = File(context.filesDir, "models")
         if (!dir.exists()) dir.mkdirs()
@@ -61,6 +63,7 @@ object LlamaRuntime {
         return target
     }
 
+    @JvmStatic
     fun isGguf(file: File): Boolean {
         if (!file.exists() || file.length() < 4) return false
         FileInputStream(file).use { input ->
