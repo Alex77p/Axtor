@@ -18,6 +18,12 @@ The app:
 - Uses the same local model from the voice assistant when available.
 - Prefers offline Android speech recognition and keeps voice command processing local after speech recognition.
 
+## Download and import
+
+**Download an AI agent or model from a website and import it into the app.**
+
+After downloading a supported model, use the app's model import option to select the local file. The app currently supports GGUF model files for local inference.
+
 ## Model sizing
 
 A Q4_K_M model needs substantial RAM in addition to the file size. Start with small models such as 0.5B–3B on phones with limited memory. Large 7B/8B models may fail to load or be killed on devices with insufficient RAM.
