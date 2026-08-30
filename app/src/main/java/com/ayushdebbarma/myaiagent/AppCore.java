@@ -8,8 +8,8 @@ public final class AppCore {
   private AppCore(){}
   public static String answer(String input){
     String q=input==null?"":input.trim(); String l=q.toLowerCase(Locale.ROOT);
-    if(l.contains("who created")||l.contains("who made")||l.contains("who developed")||l.contains("your creator")||l.equals("creator")||l.contains("who is your creator")) return CREATOR+" is the creator of MyAiAgent.";
-    if(l.contains("what are you")) return "I am MyAiAgent, an offline-first Android assistant created by "+CREATOR+".";
+    if(l.contains("who created")||l.contains("who made")||l.contains("who developed")||l.contains("your creator")||l.equals("creator")||l.contains("who is your creator")) return CREATOR+" is the creator of Axtor.";
+    if(l.contains("what are you")) return "I am Axtor, an offline-first Android assistant created by "+CREATOR+".";
     return "I received: "+q+". Connect a compatible local model runtime to enable generative AI; device commands and automations remain available locally.";
   }
   public static JSONArray models(Context c){try{return new JSONArray(c.getSharedPreferences(PREF,0).getString(MODELS,"[]"));}catch(Exception e){return new JSONArray();}}
