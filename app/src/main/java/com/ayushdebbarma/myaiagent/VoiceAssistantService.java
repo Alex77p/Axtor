@@ -27,7 +27,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     VoiceServiceState.setRunning(true);
     NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
     if(Build.VERSION.SDK_INT>=26){
-      NotificationChannel c=new NotificationChannel("voice","MyAiAgent Voice",NotificationManager.IMPORTANCE_LOW);
+      NotificationChannel c=new NotificationChannel("voice","Axtor Voice",NotificationManager.IMPORTANCE_LOW);
       nm.createNotificationChannel(c);
     }
     Intent stop=new Intent(this,VoiceAssistantService.class);
@@ -101,7 +101,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     String[] parts=text.trim().split("(?<=[.!?])\\s+");
     for(String part:parts){
       String sentence=part.trim();
-      if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,"myai-"+System.nanoTime());
+      if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,"axtor-"+System.nanoTime());
     }
   }
 
@@ -126,6 +126,10 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   public void onInit(int status){ttsReady=(status==TextToSpeech.SUCCESS);}
 
   public void onResults(Bundle r){
+    if(onlineFallback){
+      onlineFallback=false;
+      getSharedPreferences("axtor_voice",0).edit().putBoolean("prefer_offline",true).apply();
+    }
     ArrayList<String> x=r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
     if(x!=null){
       for(String candidate:x){
