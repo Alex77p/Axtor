@@ -16,7 +16,6 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   Intent recognizerIntent;
   TextToSpeech tts;
   boolean running=true;
-  final String[] wakeWords={"hey myai","hey my ai","myai","my ai","hey axtor","axtor"};
 
   @Override public void onCreate(){
     super.onCreate();
@@ -31,7 +30,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     PendingIntent pi=PendingIntent.getService(this,1,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,"voice"):new Notification.Builder(this);
     b.setContentTitle("MyAiAgent voice assistant")
-      .setContentText("Listening for Hey MyAI / Axtor")
+      .setContentText("Listening for your custom calling phrase")
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
       .setOngoing(true)
       .addAction(new Notification.Action.Builder(null,"Stop",pi).build());
@@ -59,17 +58,14 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   String extractCommand(String q){
-    String l=q.toLowerCase(Locale.ROOT).trim();
-    for(String w:wakeWords){
-      int i=l.indexOf(w);
-      if(i>=0)return q.substring(i+w.length()).trim();
-    }
-    return null;
+    return VoiceCommandManager.extractCommand(this, q);
   }
 
   void command(String q){
     String cmd=extractCommand(q);
-    if(cmd==null||cmd.isEmpty()){say("Yes?");return;}
+    if(cmd==null)return;
+    if(cmd.isEmpty()){say("Say your calling phrase followed by a command.");return;}
+    getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",true).apply();
     String automation=DeviceAutomation.execute(this,cmd);
     if(automation!=null){say(automation);return;}
     try{
@@ -122,11 +118,12 @@ public class VoiceAssistantService extends Service implements RecognitionListene
         if(extractCommand(candidate)!=null){command(candidate);break;}
       }
     }
-    new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,900);
+    new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,650);
   }
 
   public void onError(int e){
-    new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,1200);
+    if(!running)return;
+    new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,800);
   }
   public void onReadyForSpeech(Bundle b){}
   public void onBeginningOfSpeech(){}
