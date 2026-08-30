@@ -39,8 +39,46 @@ public class MainActivity extends Activity {
   void chat(){clear();content.addView(tv("Offline Chat",22));String active=AppCore.activeModel(this);content.addView(tv(active.isEmpty()?"No GGUF model loaded. Import a model in Models.":"Active local model: "+new File(active).getName(),12));EditText q=new EditText(this);q.setHint("Ask MyAiAgent…");content.addView(q);Button send=btn("Send");TextView out=tv("",15);content.addView(out);send.setOnClickListener(v->{String x=q.getText().toString().trim();if(x.isEmpty())return;q.setText("");String path=AppCore.activeModel(this);if(path.isEmpty()){out.setText("MyAiAgent: "+AppCore.answer(x));return;}out.setText("MyAiAgent is thinking locally…");LlamaRuntime.generate(this,path,x,"You are MyAiAgent. Answer accurately and directly in one short sentence under 15 words unless detail is requested. Never claim internet access when operating locally.",128,new LlamaRuntime.Callback(){public void onSuccess(String text,double tps){runOnUiThread(()->out.setText("MyAiAgent: "+text+"\n\n"+String.format(Locale.US,"%.1f tok/s · local",tps)));}public void onError(String m){runOnUiThread(()->out.setText("Local model error: "+m));}});});content.addView(send);Button back=btn("← Back");back.setOnClickListener(v->home());content.addView(back);}
   void persistenceSetup(){clear();content.addView(tv("Maximum Persistence Setup",22));content.addView(tv("Android controls service lifecycles. Axtor cannot make itself unkillable or bypass Android restrictions. These settings maximize reliability while remaining within the OS security model.",14));Button a=btn(AxtorAccessibilityService.isEnabled()?"✓ Accessibility enabled":"♿ Enable Accessibility Service");a.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));content.addView(a);Button b=btn("🔋 Open Battery Optimization Settings");b.setOnClickListener(v->{try{startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,android.net.Uri.parse("package:"+getPackageName())));}catch(Exception e){startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}});content.addView(b);Button n=btn("🔔 Open App Notification Settings");n.setOnClickListener(v->{Intent i=new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);i.putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName());startActivity(i);});content.addView(n);Button w=btn(getSharedPreferences("axtor",MODE_PRIVATE).getBoolean("watchdog_enabled",true)?"🛡 Watchdog: ON":"🛡 Watchdog: OFF");w.setOnClickListener(x->{boolean on=!getSharedPreferences("axtor",MODE_PRIVATE).getBoolean("watchdog_enabled",true);getSharedPreferences("axtor",MODE_PRIVATE).edit().putBoolean("watchdog_enabled",on).apply();w.setText(on?"🛡 Watchdog: ON":"🛡 Watchdog: OFF");if(on)WatchdogScheduler.schedule(this);else WatchdogScheduler.cancel(this);});content.addView(w);Button v=btn("🎙 Start Voice Assistant");v.setOnClickListener(x->voice());content.addView(v);Button back=btn("← Back");back.setOnClickListener(x->home());content.addView(back);}
   void voice(){
-    if(!VoiceCommandManager.isConfigured(this)){voiceSetup();return;}
-    getSharedPreferences("axtor",MODE_PRIVATE).edit().putBoolean("voice_enabled",true).apply();if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO);return;}Intent i=new Intent(this,VoiceAssistantService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);Toast.makeText(this,"Voice assistant started. Keep the persistent notification enabled.",Toast.LENGTH_LONG).show();}
+    clear();
+    content.addView(tv("Voice Assistant",22));
+    content.addView(tv("Calling phrase: “"+VoiceCommandManager.getCallPhrase(this)+"”",14));
+    content.addView(tv("Say your custom phrase first, then the command. For example: “"+VoiceCommandManager.getCallPhrase(this)+" turn the volume down”. Axtor ignores speech that does not start with your phrase.",14));
+    Button change=btn("✎ Change Calling Phrase");
+    change.setOnClickListener(v->voiceSetup());
+    content.addView(change);
+    Button test=btn("🧪 Test Voice System");
+    test.setOnClickListener(v->{
+      String d=VoiceCommandManager.diagnose(this);
+      Toast.makeText(this,d,Toast.LENGTH_LONG).show();
+      if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO);
+      }
+    });
+    content.addView(test);
+    Button repair=btn("🛠 Repair / Restart Voice");
+    repair.setOnClickListener(v->{
+      boolean ok=VoiceCommandManager.repair(this);
+      Toast.makeText(this,ok?"Voice service restarted.":"Android blocked the service start; check microphone and battery settings.",Toast.LENGTH_LONG).show();
+    });
+    content.addView(repair);
+    Button start=btn(VoiceServiceState.isRunning()?"✓ Voice Assistant Running":"🎙 Start Voice Assistant");
+    start.setOnClickListener(v->{
+      if(!VoiceCommandManager.isConfigured(this)){voiceSetup();return;}
+      getSharedPreferences("axtor",MODE_PRIVATE).edit().putBoolean("voice_enabled",true).apply();
+      if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO);return;
+      }
+      Intent i=new Intent(this,VoiceAssistantService.class);
+      try{if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);}
+      catch(Exception e){Toast.makeText(this,"Could not start voice: "+e.getMessage(),Toast.LENGTH_LONG).show();return;}
+      Toast.makeText(this,"Voice assistant started.",Toast.LENGTH_SHORT).show();
+      voice();
+    });
+    content.addView(start);
+    Button back=btn("← Back");
+    back.setOnClickListener(v->home());
+    content.addView(back);
+  }
   void voiceSetup(){
     clear();
     content.addView(tv("Custom Voice Calling",26));
