@@ -7,6 +7,8 @@ import java.io.InputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import dev.ffmpegkit.llama.Llama
 import dev.ffmpegkit.llama.LlamaConfig
 
@@ -17,6 +19,12 @@ import dev.ffmpegkit.llama.LlamaConfig
  * The runtime is llama.cpp based and executes on-device.
  */
 object LlamaRuntime {
+    // Keep the active model resident while the app process is alive. Reloading a
+    // multi-GB GGUF file for every message is a major source of perceived latency.
+    private val modelLock = Mutex()
+    private var cachedPath: String? = null
+    private var cachedModel: dev.ffmpegkit.llama.LlamaModel? = null
+
     interface Callback {
         fun onSuccess(text: String, tokensPerSecond: Double)
         fun onError(message: String)
@@ -24,31 +32,56 @@ object LlamaRuntime {
 
     @JvmStatic
     fun generate(context: Context, modelPath: String, prompt: String, systemPrompt: String, maxTokens: Int, callback: Callback) {
-        CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.Default).launch {
             try {
                 val file = File(modelPath)
                 require(file.exists()) { "Model file does not exist: $modelPath" }
                 require(file.length() > 0) { "Model file is empty" }
-                val model = Llama.loadModel(
-                    modelPath = file.absolutePath,
-                    config = LlamaConfig(
-                        contextSize = 4096,
-                        threads = maxOf(2, Runtime.getRuntime().availableProcessors().coerceAtMost(8))
-                    )
-                )
-                try {
+
+                modelLock.withLock {
+                    // Reuse the loaded native model for subsequent requests.
+                    // A single LlamaModel is not thread-safe, so requests are serialized.
+                    val model = if (cachedModel?.isLoaded == true && cachedPath == file.absolutePath) {
+                        cachedModel!!
+                    } else {
+                        cachedModel?.let { if (it.isLoaded) Llama.releaseModel(it) }
+                        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                        Llama.loadModel(
+                            modelPath = file.absolutePath,
+                            config = LlamaConfig(
+                                contextSize = 1024,
+                                threads = threads,
+                                temperature = 0.2f,
+                                topP = 0.9f,
+                                topK = 20
+                            )
+                        ).also {
+                            cachedModel = it
+                            cachedPath = file.absolutePath
+                        }
+                    }
+
                     val result = Llama.complete(
                         model,
                         prompt = prompt,
                         systemPrompt = systemPrompt,
-                        maxTokens = maxTokens
+                        maxTokens = maxTokens.coerceIn(16, 192)
                     )
-                    callback.onSuccess(result.text, result.tokensPerSecond.toDouble())
-                } finally {
-                    Llama.releaseModel(model)
+                    callback.onSuccess(result.text.trim(), result.tokensPerSecond.toDouble())
                 }
             } catch (t: Throwable) {
                 callback.onError(t.message ?: t.javaClass.simpleName)
+            }
+        }
+    }
+
+    @JvmStatic
+    fun releaseCachedModel() {
+        kotlinx.coroutines.runBlocking {
+            modelLock.withLock {
+                cachedModel?.let { if (it.isLoaded) Llama.releaseModel(it) }
+                cachedModel = null
+                cachedPath = null
             }
         }
     }
