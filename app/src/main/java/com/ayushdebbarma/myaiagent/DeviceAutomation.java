@@ -147,7 +147,13 @@ public final class DeviceAutomation {
         String wanted = name.toLowerCase(Locale.ROOT);
         for (android.content.pm.ApplicationInfo ai : c.getPackageManager().getInstalledApplications(PackageManager.GET_META_DATA)) {
             CharSequence label = c.getPackageManager().getApplicationLabel(ai);
-            if (label != null && label.toString().toLowerCase(Locale.ROOT).equals(wanted)) return ai.packageName;
+            if (label != null) {
+                String actual = label.toString().toLowerCase(Locale.ROOT).trim();
+                if (actual.equals(wanted) ||
+                        actual.replaceAll("[^a-z0-9 ]", "").equals(wanted.replaceAll("[^a-z0-9 ]", ""))) {
+                    return ai.packageName;
+                }
+            }
         }
         return null;
     }
