@@ -109,6 +109,7 @@ public final class DeviceAutomation {
                 String prefix = l.startsWith("open ") ? "open " : (l.startsWith("launch ") ? "launch " : "start ");
                 String name = q.substring(prefix.length()).trim();
                 String packageName = findPackage(context, name);
+                if (packageName == null && name.matches("[A-Za-z0-9_]+\\.[A-Za-z0-9_.]+")) packageName = name;
                 if (packageName != null) {
                     Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
                     if (launch != null) {
