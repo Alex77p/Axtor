@@ -15,10 +15,14 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   SpeechRecognizer recognizer;
   Intent recognizerIntent;
   TextToSpeech tts;
-  boolean running=true;
+  boolean running=false;
+  boolean ttsReady=false;
+  final Handler handler=new Handler(Looper.getMainLooper());
+  boolean restartScheduled=false;
 
   @Override public void onCreate(){
     super.onCreate();
+    running=true;
     VoiceServiceState.setRunning(true);
     NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
     if(Build.VERSION.SDK_INT>=26){
@@ -29,7 +33,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     stop.setAction("STOP");
     PendingIntent pi=PendingIntent.getService(this,1,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,"voice"):new Notification.Builder(this);
-    b.setContentTitle("MyAiAgent voice assistant")
+    b.setContentTitle("Axtor voice assistant")
       .setContentText("Listening for your custom calling phrase")
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
       .setOngoing(true)
@@ -41,9 +45,10 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   void startRecognition(){
-    if(!running)return;
-    if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){say("Microphone permission is required.");return;}
-    if(!SpeechRecognizer.isRecognitionAvailable(this)){say("Speech recognition is not available on this device.");return;}
+    if(!running || restartScheduled)return;
+    restartScheduled=false;
+    if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){return;}
+    if(!SpeechRecognizer.isRecognitionAvailable(this)){return;}
     if(recognizer!=null){recognizer.destroy();recognizer=null;}
     recognizer=SpeechRecognizer.createSpeechRecognizer(this);
     recognizer.setRecognitionListener(this);
@@ -53,7 +58,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);
     try{recognizer.startListening(recognizerIntent);}catch(Exception e){
-      new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,1500);
+      scheduleRecognitionRestart(1500);
     }
   }
 
@@ -72,7 +77,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
       String path=AppCore.activeModel(this);
       if(path.isEmpty()){say(AppCore.answer(cmd));return;}
       LlamaRuntime.generate(this,path,cmd,
-        "You are MyAiAgent. Answer accurately in one short sentence under 15 words. No internet claims.",
+        "You are Axtor, an offline assistant. Answer accurately in one short sentence under 15 words. No internet claims.",
         96,new LlamaRuntime.Callback(){
           public void onSuccess(String text,double tps){sayResponse(text);}
           public void onError(String m){say("Local model error: "+m);}
@@ -81,11 +86,16 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   void say(String s){
-    if(tts!=null&&s!=null&&!s.isEmpty())tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"myai");
+    if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty())tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor");
+  }
+  void scheduleRecognitionRestart(long delay){
+    if(!running||restartScheduled)return;
+    restartScheduled=true;
+    handler.postDelayed(this::startRecognition,delay);
   }
 
   void sayResponse(String text){
-    if(tts==null||text==null||text.trim().isEmpty())return;
+    if(!ttsReady||tts==null||text==null||text.trim().isEmpty())return;
     String[] parts=text.trim().split("(?<=[.!?])\\s+");
     for(String part:parts){
       String sentence=part.trim();
@@ -103,13 +113,15 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   public void onDestroy(){
     running=false;
     if(recognizer!=null){recognizer.cancel();recognizer.destroy();}
+    ttsReady=false;
+    handler.removeCallbacksAndMessages(null);
     if(tts!=null){tts.stop();tts.shutdown();}
     VoiceServiceState.setRunning(false);
     super.onDestroy();
   }
 
   public android.os.IBinder onBind(Intent i){return null;}
-  public void onInit(int status){}
+  public void onInit(int status){ttsReady=(status==TextToSpeech.SUCCESS);}
 
   public void onResults(Bundle r){
     ArrayList<String> x=r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
@@ -118,12 +130,12 @@ public class VoiceAssistantService extends Service implements RecognitionListene
         if(extractCommand(candidate)!=null){command(candidate);break;}
       }
     }
-    new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,650);
+    scheduleRecognitionRestart(650);
   }
 
   public void onError(int e){
     if(!running)return;
-    new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,800);
+    scheduleRecognitionRestart(800);
   }
   public void onReadyForSpeech(Bundle b){}
   public void onBeginningOfSpeech(){}
