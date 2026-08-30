@@ -112,7 +112,7 @@ public final class DeviceAutomation {
                 return "Voice input settings opened.";
             }
             if (l.contains("open notification settings") || l.contains("notification settings")) {
-                context.startActivity(new Intent(Settings.ACTION_NOTIFICATION_SETTINGS)
+                context.startActivity(new Intent(Settings.ACTION_ALL_APPS_SETTINGS)
                         .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 return "Notification settings opened.";
