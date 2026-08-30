@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">MyAiAgent</string>
+    <string name="app_name">Axtor</string>
     <string name="accessibility_description">Axtor device automation service. It performs user-requested navigation and global device actions after the user explicitly enables the service.</string>
 </resources>
