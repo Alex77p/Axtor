@@ -52,7 +52,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,false);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
-    recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,5);
+    recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);
     try{recognizer.startListening(recognizerIntent);}catch(Exception e){
       new Handler(Looper.getMainLooper()).postDelayed(this::startRecognition,1500);
     }
@@ -75,11 +75,10 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     try{
       String path=AppCore.activeModel(this);
       if(path.isEmpty()){say(AppCore.answer(cmd));return;}
-      say("Thinking locally.");
       LlamaRuntime.generate(this,path,cmd,
-        "You are MyAiAgent, a private offline Android voice assistant created by Ayush Debbarma. Answer briefly. Do not claim internet access.",
-        192,new LlamaRuntime.Callback(){
-          public void onSuccess(String text,double tps){say(text);}
+        "You are MyAiAgent. Answer accurately in one short sentence under 15 words. No internet claims.",
+        96,new LlamaRuntime.Callback(){
+          public void onSuccess(String text,double tps){sayResponse(text);}
           public void onError(String m){say("Local model error: "+m);}
         });
     }catch(Exception e){say("I couldn't perform that action: "+e.getMessage());}
@@ -87,6 +86,15 @@ public class VoiceAssistantService extends Service implements RecognitionListene
 
   void say(String s){
     if(tts!=null&&s!=null&&!s.isEmpty())tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"myai");
+  }
+
+  void sayResponse(String text){
+    if(tts==null||text==null||text.trim().isEmpty())return;
+    String[] parts=text.trim().split("(?<=[.!?])\\s+");
+    for(String part:parts){
+      String sentence=part.trim();
+      if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,"myai-"+System.nanoTime());
+    }
   }
 
   public int onStartCommand(Intent i,int f,int s){
