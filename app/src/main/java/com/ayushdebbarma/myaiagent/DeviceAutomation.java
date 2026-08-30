@@ -73,6 +73,25 @@ public final class DeviceAutomation {
                 return AxtorAccessibilityService.lockScreen() ? "Screen locked." : accessibilityRequired();
             }
 
+            if (l.contains("open app settings") || l.contains("application settings")) {
+                context.startActivity(new Intent(Settings.ACTION_APPLICATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return "App settings opened.";
+            }
+            if (l.contains("open accessibility settings")) {
+                context.startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return "Accessibility settings opened.";
+            }
+            if (l.contains("open voice input settings") || l.contains("speech settings")) {
+                context.startActivity(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return "Voice input settings opened.";
+            }
+            if (l.contains("open notification settings") || l.contains("notification settings")) {
+                context.startActivity(new Intent(Settings.ACTION_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return "Notification settings opened.";
+            }
+
             if (l.contains("open settings")) {
                 context.startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 return "Settings opened.";
@@ -86,8 +105,9 @@ public final class DeviceAutomation {
                 return "Bluetooth settings opened.";
             }
 
-            if (l.startsWith("open ")) {
-                String name = q.substring(5).trim();
+            if (l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ")) {
+                String prefix = l.startsWith("open ") ? "open " : (l.startsWith("launch ") ? "launch " : "start ");
+                String name = q.substring(prefix.length()).trim();
                 String packageName = findPackage(context, name);
                 if (packageName != null) {
                     Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
