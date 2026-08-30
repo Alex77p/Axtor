@@ -20,6 +20,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   final Handler handler=new Handler(Looper.getMainLooper());
   boolean restartScheduled=false;
   boolean onlineFallback=false;
+  boolean usingOnDevice=false;
 
   @Override public void onCreate(){
     super.onCreate();
@@ -51,13 +52,19 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){return;}
     if(!SpeechRecognizer.isRecognitionAvailable(this)){return;}
     if(recognizer!=null){recognizer.destroy();recognizer=null;}
-    recognizer=SpeechRecognizer.createSpeechRecognizer(this);
+    if(Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){
+      recognizer=SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
+      usingOnDevice=true;
+    }else{
+      recognizer=SpeechRecognizer.createSpeechRecognizer(this);
+      usingOnDevice=false;
+    }
     recognizer.setRecognitionListener(this);
     recognizerIntent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,false);
     boolean preferOffline=getSharedPreferences("axtor_voice",0).getBoolean("prefer_offline",true);
-    recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,preferOffline);
+    recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,preferOffline || usingOnDevice);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);
     try{recognizer.startListening(recognizerIntent);}catch(Exception e){
       scheduleRecognitionRestart(1500);
