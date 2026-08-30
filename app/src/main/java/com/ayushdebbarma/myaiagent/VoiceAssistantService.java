@@ -19,6 +19,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   boolean ttsReady=false;
   final Handler handler=new Handler(Looper.getMainLooper());
   boolean restartScheduled=false;
+  boolean onlineFallback=false;
 
   @Override public void onCreate(){
     super.onCreate();
@@ -55,7 +56,8 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     recognizerIntent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,false);
-    recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
+    boolean preferOffline=getSharedPreferences("axtor_voice",0).getBoolean("prefer_offline",true);
+    recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,preferOffline);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);
     try{recognizer.startListening(recognizerIntent);}catch(Exception e){
       scheduleRecognitionRestart(1500);
@@ -135,6 +137,14 @@ public class VoiceAssistantService extends Service implements RecognitionListene
 
   public void onError(int e){
     if(!running)return;
+    if(getSharedPreferences("axtor_voice",0).getBoolean("prefer_offline",true) && !onlineFallback){
+      onlineFallback=true;
+      getSharedPreferences("axtor_voice",0).edit().putBoolean("prefer_offline",false).apply();
+      scheduleRecognitionRestart(300);
+      return;
+    }
+    onlineFallback=false;
+    getSharedPreferences("axtor_voice",0).edit().putBoolean("prefer_offline",true).apply();
     scheduleRecognitionRestart(800);
   }
   public void onReadyForSpeech(Bundle b){}
