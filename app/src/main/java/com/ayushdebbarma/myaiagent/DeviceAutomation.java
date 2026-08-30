@@ -5,6 +5,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.media.AudioManager;
 import android.provider.Settings;
 
@@ -47,7 +48,7 @@ public final class DeviceAutomation {
                 String action = parts[0];
                 if (!action.matches("[A-Za-z0-9_.]+")) return "Invalid Android Intent action.";
                 Intent intent = new Intent(action);
-                if (parts.length > 1 && !parts[1].trim().isEmpty()) intent.setData(android.net.Uri.parse(parts[1].trim()));
+                if (parts.length > 1 && !parts[1].trim().isEmpty()) intent.setData(Uri.parse(parts[1].trim()));
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 if (context.getPackageManager().resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) return "Android has no app available for that action.";
                 context.startActivity(intent);
