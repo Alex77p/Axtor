@@ -141,7 +141,7 @@ public final class DeviceAutomation {
                 else if(key.equals("display")||key.equals("display_settings")) action=Settings.ACTION_DISPLAY_SETTINGS;
                 else if(key.equals("battery")||key.equals("battery_settings")) action=Settings.ACTION_BATTERY_SAVER_SETTINGS;
                 else if(key.equals("accessibility")||key.equals("accessibility_settings")) action=Settings.ACTION_ACCESSIBILITY_SETTINGS;
-                else if(key.equals("notification")||key.equals("notification_settings")) action=Settings.ACTION_NOTIFICATION_SETTINGS;
+                else if(key.equals("notification")||key.equals("notification_settings")) action=Settings.ACTION_ALL_APPS_SETTINGS;
                 else if(key.equals("app")||key.equals("app_settings")) action=Settings.ACTION_APPLICATION_SETTINGS;
                 else if(key.equals("language")||key.equals("language_settings")) action=Settings.ACTION_LOCALE_SETTINGS;
                 else if(key.equals("date")||key.equals("date_settings")) action=Settings.ACTION_DATE_SETTINGS;
