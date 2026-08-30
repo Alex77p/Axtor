@@ -17,6 +17,21 @@ public final class DeviceAutomation {
         String q = command == null ? "" : command.trim();
         String l = q.toLowerCase(Locale.ROOT);
         try {
+            // Run user-defined automation phrases before built-in command parsing.
+            android.content.SharedPreferences flowPrefs = context.getSharedPreferences("myaiagent", 0);
+            String rawFlows = flowPrefs.getString("flows", "[]");
+            org.json.JSONArray saved = new org.json.JSONArray(rawFlows);
+            for (int i = 0; i < saved.length(); i++) {
+                org.json.JSONObject rule = saved.optJSONObject(i);
+                if (rule == null) continue;
+                String trigger = rule.optString("trigger", "").trim().toLowerCase(Locale.ROOT);
+                String action = rule.optString("action", "").trim();
+                if (!trigger.isEmpty() && !action.isEmpty() &&
+                        (l.equals(trigger) || l.startsWith(trigger + " "))) {
+                    return execute(context, action);
+                }
+            }
+
             AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
             if (l.contains("volume up") || l.contains("increase volume") || l.contains("turn up volume")) {
