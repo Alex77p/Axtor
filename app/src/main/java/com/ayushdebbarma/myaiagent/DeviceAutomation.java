@@ -38,6 +38,31 @@ public final class DeviceAutomation {
                 }
             }
 
+            // Arbitrary user-selected public Android Intent action.
+            // Syntax: intent <ACTION> [URI]
+            if (l.startsWith("intent ")) {
+                String spec = q.substring(7).trim();
+                if (spec.isEmpty()) return "Provide an Android Intent action.";
+                String[] parts = spec.split("\\\\s+", 2);
+                String action = parts[0];
+                if (!action.matches("[A-Za-z0-9_.]+")) return "Invalid Android Intent action.";
+                Intent intent = new Intent(action);
+                if (parts.length > 1 && !parts[1].trim().isEmpty()) intent.setData(android.net.Uri.parse(parts[1].trim()));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (context.getPackageManager().resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) return "Android has no app available for that action.";
+                context.startActivity(intent);
+                return "Custom Android action executed.";
+            }
+
+            if (l.startsWith("url ")) {
+                String uri = q.substring(4).trim();
+                if (!uri.matches("(?i)https?://\\\\S+")) return "Only http/https URLs are supported.";
+                Intent intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+                return "URL opened.";
+            }
+
             AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
             if (l.contains("volume up") || l.contains("increase volume") || l.contains("turn up volume")) {
