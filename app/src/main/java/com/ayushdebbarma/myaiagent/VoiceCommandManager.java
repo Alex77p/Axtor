@@ -55,7 +55,7 @@ public final class VoiceCommandManager {
 
     public static String normalize(String text) {
         if (text == null) return "";
-        return text.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        return text.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._ -]", " ").replaceAll("\\s+", " ");
     }
 
     public static String diagnose(Context c) {
