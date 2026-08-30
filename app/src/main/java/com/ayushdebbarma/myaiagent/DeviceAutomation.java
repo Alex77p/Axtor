@@ -105,6 +105,29 @@ public final class DeviceAutomation {
                 return "Bluetooth settings opened.";
             }
 
+            // User-defined Android actions through public Settings intents.
+            if (l.startsWith("settings ")) {
+                String key=l.substring(9).trim().replace(' ', '_');
+                String action=null;
+                if(key.equals("wifi")||key.equals("wifi_settings")) action=Settings.ACTION_WIFI_SETTINGS;
+                else if(key.equals("bluetooth")||key.equals("bluetooth_settings")) action=Settings.ACTION_BLUETOOTH_SETTINGS;
+                else if(key.equals("sound")||key.equals("sound_settings")) action=Settings.ACTION_SOUND_SETTINGS;
+                else if(key.equals("display")||key.equals("display_settings")) action=Settings.ACTION_DISPLAY_SETTINGS;
+                else if(key.equals("battery")||key.equals("battery_settings")) action=Settings.ACTION_BATTERY_SAVER_SETTINGS;
+                else if(key.equals("accessibility")||key.equals("accessibility_settings")) action=Settings.ACTION_ACCESSIBILITY_SETTINGS;
+                else if(key.equals("notification")||key.equals("notification_settings")) action=Settings.ACTION_NOTIFICATION_SETTINGS;
+                else if(key.equals("app")||key.equals("app_settings")) action=Settings.ACTION_APPLICATION_SETTINGS;
+                else if(key.equals("language")||key.equals("language_settings")) action=Settings.ACTION_LOCALE_SETTINGS;
+                else if(key.equals("date")||key.equals("date_settings")) action=Settings.ACTION_DATE_SETTINGS;
+                else if(key.equals("developer")||key.equals("developer_settings")) action=Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS;
+                else if(key.equals("security")||key.equals("security_settings")) action=Settings.ACTION_SECURITY_SETTINGS;
+                if(action!=null){
+                    context.startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    return "Settings opened.";
+                }
+                return "That Android setting is not supported by this version of Axtor.";
+            }
+
             if (l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ")) {
                 String prefix = l.startsWith("open ") ? "open " : (l.startsWith("launch ") ? "launch " : "start ");
                 String name = q.substring(prefix.length()).trim();
