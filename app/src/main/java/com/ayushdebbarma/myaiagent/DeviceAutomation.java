@@ -30,6 +30,12 @@ public final class DeviceAutomation {
                         (l.equals(trigger) || l.startsWith(trigger + " "))) {
                     return execute(context, action);
                 }
+                // Also accept small punctuation/casing differences in saved custom commands.
+                String normalizedTrigger = trigger.replaceAll("[^a-z0-9 ]", "").replaceAll("\\s+", " ").trim();
+                String normalizedInput = l.replaceAll("[^a-z0-9 ]", "").replaceAll("\\s+", " ").trim();
+                if (!normalizedTrigger.isEmpty() && (normalizedInput.equals(normalizedTrigger) || normalizedInput.startsWith(normalizedTrigger + " "))) {
+                    return execute(context, action);
+                }
             }
 
             AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
