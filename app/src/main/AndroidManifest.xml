@@ -10,7 +10,13 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>
-    <application android:theme="@style/AppTheme" android:label="MyAiAgent" android:allowBackup="true" android:supportsRtl="true">
+    <application
+        android:theme="@style/AppTheme"
+        android:label="Axtor"
+        android:icon="@drawable/ic_axtor"
+        android:roundIcon="@drawable/ic_axtor"
+        android:allowBackup="true"
+        android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
