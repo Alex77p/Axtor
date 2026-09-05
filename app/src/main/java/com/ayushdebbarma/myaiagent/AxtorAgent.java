@@ -16,14 +16,16 @@ public final class AxtorAgent {
     public static void handle(Context context,String command,Callback callback){
         final String q=command==null?"":command.trim();
         if(q.isEmpty()){callback.onReply("Say a command or ask a question.");return;}
+        ComponentRegistry.register(context,"agent-router","1","running");
         try{
             // Tool stage: execute deterministic Android actions before asking the model.
             String action=DeviceAutomation.execute(context,q);
             if(action!=null){
+                String verified=AgentExecutionVerifier.verify(context,q,action);
                 remember(context,"user",q);
-                remember(context,"tool",action);
-                remember(context,"assistant",action);
-                callback.onReply(action);
+                remember(context,"tool",verified);
+                remember(context,"assistant",verified);
+                callback.onReply(verified);
                 return;
             }
 
@@ -46,10 +48,10 @@ public final class AxtorAgent {
             remember(context,"user",q);
             LlamaRuntime.generate(context,model,prompt,system,128,new LlamaRuntime.Callback(){
                 @Override public void onSuccess(String text,double tps){String answer=text==null?"":text.trim();if(answer.isEmpty())answer="I couldn't generate a response.";remember(context,"assistant",answer);callback.onReply(answer);}
-                @Override public void onError(String message){callback.onError("Local model error: "+message);}
+                @Override public void onError(String message){AutonomousRepairEngine.recordFailure(context,"llama-runtime",message);callback.onError("Local model error: "+message);}
             });
-        }catch(OutOfMemoryError oom){try{LlamaRuntime.releaseCachedModel();}catch(Throwable ignored){}callback.onError("The model needs more memory. Try a smaller quantized GGUF model.");}
-        catch(Throwable t){callback.onError(t.getMessage()==null?t.getClass().getSimpleName():t.getMessage());}
+        }catch(OutOfMemoryError oom){try{LlamaRuntime.releaseCachedModel();}catch(Throwable ignored){}AutonomousRepairEngine.recordFailure(context,"llama-runtime","Out of memory");callback.onError("The model needs more memory. Try a smaller quantized GGUF model.");}
+        catch(Throwable t){AutonomousRepairEngine.recordFailure(context,"agent-router",t.toString());callback.onError(t.getMessage()==null?t.getClass().getSimpleName():t.getMessage());}
     }
 
     public static boolean accessibilityAvailable(){return AxtorAccessibilityService.isEnabled();}
