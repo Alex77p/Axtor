@@ -78,6 +78,8 @@ public final class VoiceCommandManager {
 
     public static boolean repair(Context c) {
         try {
+            c.getSharedPreferences(PREF, 0).edit().putBoolean("continuous_listening", true).apply();
+            c.getSharedPreferences("axtor", 0).edit().putBoolean("voice_enabled", true).apply();
             c.stopService(new android.content.Intent(c, VoiceAssistantService.class));
             android.content.Intent i = new android.content.Intent(c, VoiceAssistantService.class);
             if (android.os.Build.VERSION.SDK_INT >= 26) c.startForegroundService(i);
