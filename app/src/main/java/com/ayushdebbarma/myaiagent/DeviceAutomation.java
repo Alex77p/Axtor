@@ -60,6 +60,23 @@ public final class DeviceAutomation {
                 return "URL opened.";
             }
 
+            if (l.contains("open sound trigger") || l.contains("sound trigger settings") || l.contains("open hands-free sound")) {
+                Intent i = new Intent(context, SoundTriggerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(i);
+                return "Hands-free sound trigger settings opened.";
+            }
+            if (l.equals("start sound triggers") || l.equals("enable sound triggers")) {
+                context.getSharedPreferences("axtor_sound", 0).edit().putBoolean("enabled", true).apply();
+                Intent i = new Intent(context, SoundTriggerService.class);
+                if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(i); else context.startService(i);
+                return "Sound triggers enabled.";
+            }
+            if (l.equals("stop sound triggers") || l.equals("disable sound triggers")) {
+                context.getSharedPreferences("axtor_sound", 0).edit().putBoolean("enabled", false).apply();
+                context.stopService(new Intent(context, SoundTriggerService.class));
+                return "Sound triggers disabled.";
+            }
+
             AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
             if (l.contains("volume up") || l.contains("increase volume") || l.contains("turn up volume")) {
@@ -148,9 +165,7 @@ public final class DeviceAutomation {
                 else if(key.equals("security")||key.equals("security_settings")) action=Settings.ACTION_SECURITY_SETTINGS;
                 if(action!=null){
                     Intent settingsIntent = new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    if (action.equals(Settings.ACTION_APP_NOTIFICATION_SETTINGS)) {
-                        settingsIntent.putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName());
-                    }
+                    if (action.equals(Settings.ACTION_APP_NOTIFICATION_SETTINGS)) settingsIntent.putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName());
                     context.startActivity(settingsIntent);
                     return "Settings opened.";
                 }
@@ -164,11 +179,7 @@ public final class DeviceAutomation {
                 if (packageName == null && name.matches("[A-Za-z0-9_]+\\.[A-Za-z0-9_.]+")) packageName = name;
                 if (packageName != null) {
                     Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
-                    if (launch != null) {
-                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        context.startActivity(launch);
-                        return "Opened " + name + ".";
-                    }
+                    if (launch != null) { launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(launch); return "Opened " + name + "."; }
                 }
                 return "I couldn't find an installed app named " + name + ".";
             }
@@ -176,8 +187,7 @@ public final class DeviceAutomation {
             if (l.startsWith("set an alarm") || l.startsWith("set alarm")) {
                 long when = System.currentTimeMillis() + 60_000L;
                 Intent alarm = new Intent(context, AlarmReceiver.class);
-                PendingIntent pi = PendingIntent.getBroadcast(context, 1001, alarm,
-                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                PendingIntent pi = PendingIntent.getBroadcast(context, 1001, alarm, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
                 return "Alarm set for one minute from now.";
@@ -191,9 +201,7 @@ public final class DeviceAutomation {
         }
     }
 
-    private static String accessibilityRequired() {
-        return "Please enable Axtor Accessibility Service in Android Settings for this device action.";
-    }
+    private static String accessibilityRequired() { return "Please enable Axtor Accessibility Service in Android Settings for this device action."; }
 
     private static String findPackage(Context c, String name) {
         String wanted = name.toLowerCase(Locale.ROOT);
@@ -201,10 +209,7 @@ public final class DeviceAutomation {
             CharSequence label = c.getPackageManager().getApplicationLabel(ai);
             if (label != null) {
                 String actual = label.toString().toLowerCase(Locale.ROOT).trim();
-                if (actual.equals(wanted) ||
-                        actual.replaceAll("[^a-z0-9 ]", "").equals(wanted.replaceAll("[^a-z0-9 ]", ""))) {
-                    return ai.packageName;
-                }
+                if (actual.equals(wanted) || actual.replaceAll("[^a-z0-9 ]", "").equals(wanted.replaceAll("[^a-z0-9 ]", ""))) return ai.packageName;
             }
         }
         return null;
