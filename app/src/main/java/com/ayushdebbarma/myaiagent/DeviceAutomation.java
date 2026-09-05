@@ -18,7 +18,6 @@ public final class DeviceAutomation {
         String q = command == null ? "" : command.trim();
         String l = q.toLowerCase(Locale.ROOT);
         try {
-            // Run user-defined automation phrases before built-in command parsing.
             android.content.SharedPreferences flowPrefs = context.getSharedPreferences("myaiagent", 0);
             String rawFlows = flowPrefs.getString("flows", "[]");
             org.json.JSONArray saved = new org.json.JSONArray(rawFlows);
@@ -31,7 +30,6 @@ public final class DeviceAutomation {
                         (l.equals(trigger) || l.startsWith(trigger + " "))) {
                     return execute(context, action);
                 }
-                // Also accept small punctuation/casing differences in saved custom commands.
                 String normalizedTrigger = trigger.replaceAll("[^a-z0-9 ]", "").replaceAll("\\s+", " ").trim();
                 String normalizedInput = l.replaceAll("[^a-z0-9 ]", "").replaceAll("\\s+", " ").trim();
                 if (!normalizedTrigger.isEmpty() && (normalizedInput.equals(normalizedTrigger) || normalizedInput.startsWith(normalizedTrigger + " "))) {
@@ -39,8 +37,6 @@ public final class DeviceAutomation {
                 }
             }
 
-            // Arbitrary user-selected public Android Intent action.
-            // Syntax: intent <ACTION> [URI]
             if (l.startsWith("intent ")) {
                 String spec = q.substring(7).trim();
                 if (spec.isEmpty()) return "Provide an Android Intent action.";
@@ -95,7 +91,12 @@ public final class DeviceAutomation {
             if (l.contains("open notifications") || l.contains("show notifications")) {
                 return AxtorAccessibilityService.notifications() ? "Notifications opened." : accessibilityRequired();
             }
-            if (l.contains("lock screen") || l.equals("lock phone")) {
+            // Accept natural speech variants such as "lock the screen" and
+            // "computer, lock my phone" after the calling phrase is removed.
+            if (l.contains("lock screen") || l.contains("lock the screen") ||
+                    l.contains("lock my screen") || l.contains("lock my phone") ||
+                    l.contains("lock the phone") || l.equals("lock phone") ||
+                    l.equals("lock device") || l.contains("lock my device")) {
                 return AxtorAccessibilityService.lockScreen() ? "Screen locked." : accessibilityRequired();
             }
 
@@ -131,7 +132,6 @@ public final class DeviceAutomation {
                 return "Bluetooth settings opened.";
             }
 
-            // User-defined Android actions through public Settings intents.
             if (l.startsWith("settings ")) {
                 String key=l.substring(9).trim().replace(' ', '_');
                 String action=null;
