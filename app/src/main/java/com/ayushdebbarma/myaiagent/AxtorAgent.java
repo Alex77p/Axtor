@@ -2,6 +2,7 @@ package com.ayushdebbarma.myaiagent;
 
 import android.content.Context;
 import java.io.File;
+import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -17,13 +18,31 @@ public final class AxtorAgent {
         final String q=command==null?"":command.trim();
         if(q.isEmpty()){callback.onReply("Say a command or ask a question.");return;}
         try{
+            // Tool stage: execute deterministic Android actions before asking the model.
             String action=DeviceAutomation.execute(context,q);
-            if(action!=null){remember(context,"user",q);remember(context,"assistant",action);callback.onReply(action);return;}
+            if(action!=null){
+                remember(context,"user",q);
+                remember(context,"tool",action);
+                remember(context,"assistant",action);
+                callback.onReply(action);
+                return;
+            }
+
+            // Never let the language model hallucinate an Android action that the tool layer
+            // does not support. The caller gets a truthful capability response instead.
+            if(looksLikeDeviceAction(q)){
+                String answer="I understood that as a device action, but Axtor does not have a safe tool for it yet.";
+                remember(context,"user",q);
+                remember(context,"assistant",answer);
+                callback.onReply(answer);
+                return;
+            }
+
             String model=AppCore.activeModel(context);
             if(model.isEmpty()||!AppCore.hasUsableActiveModel(context)){
                 String answer=AppCore.answer(q);remember(context,"user",q);remember(context,"assistant",answer);callback.onReply(answer);return;
             }
-            String system="You are Axtor, a private Android assistant. Answer accurately and directly. Never claim internet access when operating locally. If the user asks for an Android action, do not pretend it was executed unless the device router reported success.";
+            String system="You are Axtor, a private Android assistant. Answer accurately and directly. Never claim internet access when operating locally. Device actions are executed only by Axtor's tool layer; never pretend an action was executed. Keep answers concise when the user asks for a simple fact or command. Accessibility status: "+accessibilityStatus(context);
             String prompt=buildPrompt(context,q);
             remember(context,"user",q);
             LlamaRuntime.generate(context,model,prompt,system,128,new LlamaRuntime.Callback(){
@@ -48,7 +67,13 @@ public final class AxtorAgent {
         android.content.SharedPreferences p=context.getSharedPreferences(PREF,0);JSONArray old=history(context);JSONArray out=new JSONArray();int start=Math.max(0,old.length()-(MAX_HISTORY-1));for(int i=start;i<old.length();i++)out.put(old.opt(i));JSONObject item=new JSONObject();item.put("role",role);item.put("text",text);item.put("time",System.currentTimeMillis());out.put(item);p.edit().putString(HISTORY,out.toString()).apply();
     }catch(Exception ignored){}}
 
+    private static boolean looksLikeDeviceAction(String value){
+        String l=value.toLowerCase(Locale.ROOT).trim();
+        return l.matches(".*\\b(open|launch|start|stop|enable|disable|turn|switch|set|lock|unlock|mute|unmute|increase|decrease|lower|raise|go|show)\\b.*") &&
+               l.matches(".*\\b(app|application|settings|wifi|wi-fi|bluetooth|volume|screen|phone|device|home|back|recent|notification|alarm|sound trigger|accessibility|voice)\\b.*");
+    }
+
     private static String buildPrompt(Context context,String current){
-        StringBuilder b=new StringBuilder();b.append("Conversation history:\n");JSONArray h=history(context);for(int i=0;i<h.length();i++){JSONObject o=h.optJSONObject(i);if(o==null)continue;b.append(o.optString("role","user")).append(": ").append(o.optString("text","")).append('\n');}b.append("user: ").append(current).append('\n');b.append("assistant:");return b.toString();
+        StringBuilder b=new StringBuilder();b.append("Conversation history:\n");JSONArray h=history(context);for(int i=0;i<h.length();i++){JSONObject o=h.optJSONObject(i);if(o==null)continue;b.append(o.optString("role","user")).append(": ").append(o.optString("text","")).append('\\n');}b.append("user: ").append(current).append('\\n');b.append("assistant:");return b.toString();
     }
 }
