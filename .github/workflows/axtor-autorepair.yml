@@ -1,0 +1,101 @@
+name: Axtor Autonomous Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: Repair/improvement goal
+        required: true
+        type: string
+      target_path:
+        description: Repository source path to replace
+        required: true
+        type: string
+      replacement:
+        description: Complete replacement file body
+        required: true
+        type: string
+      proposal_id:
+        description: Axtor proposal id
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: axtor-autorepair-main
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate repair target
+        env:
+          TARGET: ${{ inputs.target_path }}
+        run: |
+          python3 - <<'PY'
+          import os
+          p=os.environ['TARGET'].strip()
+          allowed=(p.startswith('app/src/main/') or p.startswith('app/src/test/') or p.startswith('app/src/androidTest/'))
+          safe='..' not in p and not p.startswith('/') and 'AndroidManifest.xml' not in p
+          suffix=p.endswith(('.java','.kt','.xml','.json'))
+          if not (allowed and safe and suffix and len(p)<=240):
+              raise SystemExit('Unsafe repair target')
+          PY
+
+      - name: Create isolated repair branch
+        id: branch
+        run: |
+          BRANCH="axtor/repair-${GITHUB_RUN_ID}"
+          git switch -c "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Apply bounded source proposal
+        env:
+          TARGET: ${{ inputs.target_path }}
+          REPLACEMENT: ${{ inputs.replacement }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib
+          p=os.environ['TARGET'].strip()
+          body=os.environ['REPLACEMENT']
+          if len(body)>48000: raise SystemExit('Repair body exceeds 48 KiB')
+          pathlib.Path(p).write_text(body, encoding='utf-8')
+          PY
+          git diff --check
+          git diff --stat
+
+      - name: Compile and test repaired source
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean test assembleDebug --stacktrace --no-daemon
+
+      - name: Commit verified repair
+        run: |
+          git config user.name "Axtor Autonomous Repair"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "${{ inputs.target_path }}"
+          git commit -m "Axtor autonomous repair: ${{ inputs.goal }}"
+
+      - name: Fast-forward main only after verification
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          git push origin "HEAD:main"
+
+      - name: Write repair result
+        if: always()
+        run: |
+          mkdir -p .axtor
+          cat > .axtor/last-repair.json <<JSON
+          {"runId":"${GITHUB_RUN_ID}","proposalId":"${{ inputs.proposal_id }}","goal":"${{ inputs.goal }}","target":"${{ inputs.target_path }}","result":"${{ job.status }}"}
+          JSON
+          git status --short || true

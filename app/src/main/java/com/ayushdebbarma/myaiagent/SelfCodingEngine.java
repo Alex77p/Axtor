@@ -5,11 +5,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import org.json.JSONObject;
 
-/** Safe self-coding layer: creates bounded patch proposals, never executes arbitrary code. */
+/** Bounded self-coding proposal generator with an optional verified GitHub execution bridge. */
 public final class SelfCodingEngine {
     private static final String PREF = "axtor_self_coding";
     private static final String KEY = "proposal";
-    private static final int MAX_BODY = 65536;
+    private static final int MAX_BODY = 48000;
     private SelfCodingEngine() {}
 
     public static JSONObject propose(Context context, String goal, String targetPath, String replacement) {
@@ -27,11 +27,24 @@ public final class SelfCodingEngine {
             out.put("status", "proposed");
             out.put("createdAt", System.currentTimeMillis());
             context.getSharedPreferences(PREF, 0).edit().putString(KEY, out.toString()).apply();
-            ComponentRegistry.register(context, "self-coding", "1", "proposed");
+            ComponentRegistry.register(context, "self-coding", "2", "proposed");
         } catch (Exception e) {
             try { out.put("status", "rejected").put("error", e.getMessage()); } catch (Exception ignored) {}
         }
         return out;
+    }
+
+    /** Dispatches the bounded proposal to GitHub for isolated build/test verification and activation. */
+    public static JSONObject executeVerified(Context context, String goal, String targetPath, String replacement) {
+        JSONObject proposal = propose(context, goal, targetPath, replacement);
+        if (!"proposed".equals(proposal.optString("status"))) return proposal;
+        JSONObject result = GitHubRepairClient.dispatch(context, goal, targetPath, replacement);
+        try {
+            result.put("proposalId", proposal.optString("id"));
+            result.put("target", targetPath);
+            result.put("status", result.optString("status", "error"));
+        } catch (Exception ignored) {}
+        return result;
     }
 
     public static JSONObject latest(Context context) {
