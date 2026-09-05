@@ -39,16 +39,8 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Show project files
-        run: |
-          echo "Project root:"
-          pwd
-          echo "Files:"
-          find . -maxdepth 3 -type f | sort | head -300
-
       - name: Generate Gradle wrapper
-        run: |
-          gradle wrapper --gradle-version 8.10.2
+        run: gradle wrapper --gradle-version 8.10.2
 
       - name: Make wrapper executable
         run: chmod +x ./gradlew
@@ -58,6 +50,9 @@ jobs:
 
       - name: Clean
         run: ./gradlew clean
+
+      - name: Run unit tests
+        run: ./gradlew test --stacktrace
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --info
