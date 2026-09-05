@@ -7,8 +7,10 @@ import android.content.pm.ServiceInfo;
 import android.os.*;
 import android.speech.*;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import java.util.*;
 
+/** Foreground, restart-tolerant hands-free voice service. */
 public class VoiceAssistantService extends Service implements RecognitionListener, TextToSpeech.OnInitListener {
   static final int ID=71;
   SpeechRecognizer recognizer;
@@ -36,18 +38,28 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     PendingIntent pi=PendingIntent.getService(this,1,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,"voice"):new Notification.Builder(this);
     b.setContentTitle("Axtor voice assistant")
-      .setContentText("Always-on hands-free listening is active")
+      .setContentText("Hands-free listening is active")
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
       .setOngoing(true)
       .addAction(new Notification.Action.Builder(null,"Stop",pi).build());
     if(Build.VERSION.SDK_INT>=29) startForeground(ID,b.build(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
     else startForeground(ID,b.build());
     tts=new TextToSpeech(this,this);
+    tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){
+      @Override public void onStart(String id) {}
+      @Override public void onDone(String id){ if(running && continuousListening()) scheduleRecognitionRestart(350); }
+      @Override public void onError(String id){ if(running && continuousListening()) scheduleRecognitionRestart(350); }
+    });
     startRecognition();
   }
 
   private boolean continuousListening(){
     return getSharedPreferences("axtor_voice",0).getBoolean("continuous_listening",true);
+  }
+
+  private void pauseRecognition(){
+    restartScheduled=false;
+    if(recognizer!=null){try{recognizer.cancel();}catch(Exception ignored){}}
   }
 
   void startRecognition(){
@@ -80,21 +92,20 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     if(cmd==null)return;
     if(cmd.isEmpty()){say("Say your calling phrase followed by a command.");return;}
     getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",true).apply();
-    String automation=DeviceAutomation.execute(this,cmd);
-    if(automation!=null){say(automation);return;}
-    try{
-      String path=AppCore.activeModel(this);
-      if(path.isEmpty()){say(AppCore.answer(cmd));return;}
-      LlamaRuntime.generate(this,path,cmd,
-        "You are Axtor, an offline assistant. Answer accurately in one short sentence under 15 words. No internet claims.",
-        96,new LlamaRuntime.Callback(){
-          public void onSuccess(String text,double tps){sayResponse(text);}
-          public void onError(String m){say("Local model error: "+m);}
-        });
-    }catch(Exception e){say("I couldn't perform that action: "+e.getMessage());}
+    pauseRecognition();
+    AxtorAgent.handle(this,cmd,new AxtorAgent.Callback(){
+      @Override public void onReply(String text){sayResponse(text);}
+      @Override public void onError(String message){say(message);}
+    });
   }
 
-  void say(String s){if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty())tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor");}
+  void say(String s){
+    if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty()){
+      pauseRecognition();
+      tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor-"+System.nanoTime());
+    } else if(running && continuousListening()) scheduleRecognitionRestart(500);
+  }
+
   void scheduleRecognitionRestart(long delay){
     if(!running||!continuousListening()||restartScheduled)return;
     restartScheduled=true;
@@ -102,9 +113,17 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   void sayResponse(String text){
-    if(!ttsReady||tts==null||text==null||text.trim().isEmpty())return;
+    if(!ttsReady||tts==null||text==null||text.trim().isEmpty()){
+      scheduleRecognitionRestart(350);
+      return;
+    }
+    pauseRecognition();
     String[] parts=text.trim().split("(?<=[.!?])\\s+");
-    for(String part:parts){String sentence=part.trim();if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,"axtor-"+System.nanoTime());}
+    String last="axtor-last-"+System.nanoTime();
+    for(int i=0;i<parts.length;i++){
+      String sentence=parts[i].trim();
+      if(!sentence.isEmpty()) tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,i==parts.length-1?last:"axtor-"+System.nanoTime());
+    }
   }
 
   public int onStartCommand(Intent i,int f,int s){
@@ -138,8 +157,8 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     consecutiveErrors=0;
     if(onlineFallback){onlineFallback=false;getSharedPreferences("axtor_voice",0).edit().putBoolean("prefer_offline",true).apply();}
     ArrayList<String> x=r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-    if(x!=null){for(String candidate:x){if(extractCommand(candidate)!=null){command(candidate);break;}}}
-    if(continuousListening())scheduleRecognitionRestart(650);else stopSelf();
+    if(x!=null){for(String candidate:x){if(extractCommand(candidate)!=null){command(candidate);return;}}}
+    if(continuousListening())scheduleRecognitionRestart(350);else stopSelf();
   }
 
   public void onError(int e){
