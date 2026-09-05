@@ -1,4 +1,4 @@
-name: Build MyAiAgent APK
+name: Build Axtor APK
 
 on:
   workflow_dispatch:
@@ -11,61 +11,54 @@ permissions:
 
 jobs:
   build:
-    name: Build MyAiAgent
+    name: Build Axtor
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
       - name: Install Android SDK
         run: |
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
           yes | sdkmanager --licenses || true
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
-
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.10.2
-
       - name: Make wrapper executable
         run: chmod +x ./gradlew
-
-      - name: Check Gradle
-        run: ./gradlew --version
-
+      - name: Check required Axtor components
+        run: |
+          test -f app/src/main/java/com/ayushdebbarma/myaiagent/AxtorAgent.java
+          test -f app/src/main/java/com/ayushdebbarma/myaiagent/HybridAiRouter.java
+          test -f app/src/main/java/com/ayushdebbarma/myaiagent/SelfCodingEngine.java
+          test -f app/src/main/java/com/ayushdebbarma/myaiagent/RepairLoop.java
+          test -f app/src/main/java/com/ayushdebbarma/myaiagent/SelfModificationOrchestrator.java
+          test -f app/src/main/java/com/ayushdebbarma/myaiagent/SafeActivationManager.java
       - name: Clean
         run: ./gradlew clean
-
       - name: Run unit tests
         run: ./gradlew test --stacktrace
-
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --info
-
       - name: Locate APK
         run: |
           echo "Generated APKs:"
           find . -type f -name "*.apk" -print
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MyAiAgent-debug-apk
+          name: Axtor-debug-apk
           path: "**/build/outputs/apk/debug/*.apk"
           if-no-files-found: error
           retention-days: 30
