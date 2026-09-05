@@ -9,6 +9,8 @@ import android.net.Uri;
 import android.media.AudioManager;
 import android.provider.Settings;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public final class DeviceAutomation {
@@ -30,8 +32,8 @@ public final class DeviceAutomation {
                         (l.equals(trigger) || l.startsWith(trigger + " "))) {
                     return execute(context, action);
                 }
-                String normalizedTrigger = trigger.replaceAll("[^a-z0-9 ]", "").replaceAll("\\s+", " ").trim();
-                String normalizedInput = l.replaceAll("[^a-z0-9 ]", "").replaceAll("\\s+", " ").trim();
+                String normalizedTrigger = normalize(trigger);
+                String normalizedInput = normalize(l);
                 if (!normalizedTrigger.isEmpty() && (normalizedInput.equals(normalizedTrigger) || normalizedInput.startsWith(normalizedTrigger + " "))) {
                     return execute(context, action);
                 }
@@ -172,14 +174,17 @@ public final class DeviceAutomation {
                 return "That Android setting is not supported by this version of Axtor.";
             }
 
-            if (l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ")) {
-                String prefix = l.startsWith("open ") ? "open " : (l.startsWith("launch ") ? "launch " : "start ");
-                String name = q.substring(prefix.length()).trim();
+            if (isAppLaunchCommand(l)) {
+                String name = extractAppName(q);
                 String packageName = findPackage(context, name);
                 if (packageName == null && name.matches("[A-Za-z0-9_]+\\.[A-Za-z0-9_.]+")) packageName = name;
                 if (packageName != null) {
                     Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
-                    if (launch != null) { launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(launch); return "Opened " + name + "."; }
+                    if (launch != null) {
+                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        context.startActivity(launch);
+                        return "Opened " + name + ".";
+                    }
                 }
                 return "I couldn't find an installed app named " + name + ".";
             }
@@ -201,17 +206,51 @@ public final class DeviceAutomation {
         }
     }
 
-    private static String accessibilityRequired() { return "Please enable Axtor Accessibility Service in Android Settings for this device action."; }
+    private static String accessibilityRequired() {
+        return "Axtor Accessibility Service is not connected. Please enable it in Android Settings, then try again.";
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9 ]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private static boolean isAppLaunchCommand(String l) {
+        return l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ") ||
+                l.startsWith("run ") || l.startsWith("show ") || l.startsWith("go to ");
+    }
+
+    private static String extractAppName(String q) {
+        String l = q.toLowerCase(Locale.ROOT).trim();
+        String name;
+        if (l.startsWith("open ")) name = q.substring(5).trim();
+        else if (l.startsWith("launch ")) name = q.substring(7).trim();
+        else if (l.startsWith("start ")) name = q.substring(6).trim();
+        else if (l.startsWith("run ")) name = q.substring(4).trim();
+        else if (l.startsWith("show ")) name = q.substring(5).trim();
+        else if (l.startsWith("go to ")) name = q.substring(6).trim();
+        else name = q.trim();
+        name = name.replaceFirst("(?i)^(the|my|please)\\s+", "");
+        name = name.replaceFirst("(?i)\\s+(app|application)$", "").trim();
+        return name;
+    }
 
     private static String findPackage(Context c, String name) {
-        String wanted = name.toLowerCase(Locale.ROOT);
+        String wanted = normalize(name);
+        if (wanted.isEmpty()) return null;
+
+        List<String> candidates = new ArrayList<>();
         for (android.content.pm.ApplicationInfo ai : c.getPackageManager().getInstalledApplications(PackageManager.GET_META_DATA)) {
             CharSequence label = c.getPackageManager().getApplicationLabel(ai);
-            if (label != null) {
-                String actual = label.toString().toLowerCase(Locale.ROOT).trim();
-                if (actual.equals(wanted) || actual.replaceAll("[^a-z0-9 ]", "").equals(wanted.replaceAll("[^a-z0-9 ]", ""))) return ai.packageName;
-            }
+            if (label == null) continue;
+            String actual = normalize(label.toString());
+            if (actual.equals(wanted)) return ai.packageName;
+            if (!actual.isEmpty() && (actual.contains(wanted) || wanted.contains(actual))) candidates.add(ai.packageName);
         }
+
+        if (candidates.size() == 1) return candidates.get(0);
         return null;
     }
 }
