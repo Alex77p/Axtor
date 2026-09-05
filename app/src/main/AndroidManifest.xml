@@ -27,10 +27,9 @@
         </service>
         <receiver android:name=".AlarmReceiver" android:exported="false"/>
         <receiver android:name=".WatchdogReceiver" android:exported="false"/>
-        <receiver android:name=".AxtorBootReceiver" android:exported="false" android:directBootAware="true">
+        <receiver android:name=".AxtorBootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
             </intent-filter>
         </receiver>
