@@ -1,7 +1,6 @@
 package com.ayushdebbarma.myaiagent;
 
 import android.content.Context;
-import java.io.File;
 import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -74,6 +73,16 @@ public final class AxtorAgent {
     }
 
     private static String buildPrompt(Context context,String current){
-        StringBuilder b=new StringBuilder();b.append("Conversation history:\n");JSONArray h=history(context);for(int i=0;i<h.length();i++){JSONObject o=h.optJSONObject(i);if(o==null)continue;b.append(o.optString("role","user")).append(": ").append(o.optString("text","")).append('\\n');}b.append("user: ").append(current).append('\\n');b.append("assistant:");return b.toString();
+        StringBuilder b=new StringBuilder();
+        b.append("Conversation history:\n");
+        JSONArray h=history(context);
+        for(int i=0;i<h.length();i++){
+            JSONObject o=h.optJSONObject(i);
+            if(o==null)continue;
+            b.append(o.optString("role","user")).append(": ").append(o.optString("text","")).append('\n');
+        }
+        b.append("user: ").append(current).append('\n');
+        b.append("assistant:");
+        return b.toString();
     }
 }
