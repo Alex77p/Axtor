@@ -20,6 +20,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   boolean restartScheduled=false;
   boolean onlineFallback=false;
   boolean usingOnDevice=false;
+  int consecutiveErrors=0;
 
   @Override public void onCreate(){
     super.onCreate();
@@ -35,7 +36,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     PendingIntent pi=PendingIntent.getService(this,1,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,"voice"):new Notification.Builder(this);
     b.setContentTitle("Axtor voice assistant")
-      .setContentText("Voice is active only while this service is listening")
+      .setContentText("Always-on hands-free listening is active")
       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
       .setOngoing(true)
       .addAction(new Notification.Action.Builder(null,"Stop",pi).build());
@@ -46,9 +47,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   private boolean continuousListening(){
-    // Privacy-first default: one listening session per explicit start. Users who
-    // want a hands-free wake-phrase loop can enable this preference from the app.
-    return getSharedPreferences("axtor_voice",0).getBoolean("continuous_listening",false);
+    return getSharedPreferences("axtor_voice",0).getBoolean("continuous_listening",true);
   }
 
   void startRecognition(){
@@ -56,7 +55,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     restartScheduled=false;
     if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){stopSelf();return;}
     if(!SpeechRecognizer.isRecognitionAvailable(this)){stopSelf();return;}
-    if(recognizer!=null){recognizer.destroy();recognizer=null;}
+    if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}recognizer=null;}
     if(Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){
       recognizer=SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
       usingOnDevice=true;
@@ -71,14 +70,10 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     boolean preferOffline=getSharedPreferences("axtor_voice",0).getBoolean("prefer_offline",true);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,preferOffline || usingOnDevice);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);
-    try{recognizer.startListening(recognizerIntent);}catch(Exception e){
-      scheduleRecognitionRestart(1500);
-    }
+    try{recognizer.startListening(recognizerIntent);}catch(Exception e){scheduleRecognitionRestart(1200);}
   }
 
-  String extractCommand(String q){
-    return VoiceCommandManager.extractCommand(this, q);
-  }
+  String extractCommand(String q){return VoiceCommandManager.extractCommand(this,q);}
 
   void command(String q){
     String cmd=extractCommand(q);
@@ -99,11 +94,9 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     }catch(Exception e){say("I couldn't perform that action: "+e.getMessage());}
   }
 
-  void say(String s){
-    if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty())tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor");
-  }
+  void say(String s){if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty())tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor");}
   void scheduleRecognitionRestart(long delay){
-    if(!running||restartScheduled||!continuousListening())return;
+    if(!running||!continuousListening()||restartScheduled)return;
     restartScheduled=true;
     handler.postDelayed(this::startRecognition,delay);
   }
@@ -111,22 +104,26 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   void sayResponse(String text){
     if(!ttsReady||tts==null||text==null||text.trim().isEmpty())return;
     String[] parts=text.trim().split("(?<=[.!?])\\s+");
-    for(String part:parts){
-      String sentence=part.trim();
-      if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,"axtor-"+System.nanoTime());
-    }
+    for(String part:parts){String sentence=part.trim();if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,"axtor-"+System.nanoTime());}
   }
 
   public int onStartCommand(Intent i,int f,int s){
-    if(i!=null&&"STOP".equals(i.getAction())){stopSelf();return START_NOT_STICKY;}
+    if(i!=null&&"STOP".equals(i.getAction())){
+      getSharedPreferences("axtor",0).edit().putBoolean("voice_enabled",false).apply();
+      getSharedPreferences("axtor_voice",0).edit().putBoolean("continuous_listening",false).apply();
+      stopSelf();
+      return START_NOT_STICKY;
+    }
     running=true;
+    VoiceServiceState.setRunning(true);
     if(recognizer==null)startRecognition();
-    return START_NOT_STICKY;
+    return START_STICKY;
   }
 
   public void onDestroy(){
     running=false;
-    if(recognizer!=null){recognizer.cancel();recognizer.destroy();}
+    if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}}
+    recognizer=null;
     ttsReady=false;
     handler.removeCallbacksAndMessages(null);
     if(tts!=null){tts.stop();tts.shutdown();}
@@ -138,22 +135,16 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   public void onInit(int status){ttsReady=(status==TextToSpeech.SUCCESS);}
 
   public void onResults(Bundle r){
-    if(onlineFallback){
-      onlineFallback=false;
-      getSharedPreferences("axtor_voice",0).edit().putBoolean("prefer_offline",true).apply();
-    }
+    consecutiveErrors=0;
+    if(onlineFallback){onlineFallback=false;getSharedPreferences("axtor_voice",0).edit().putBoolean("prefer_offline",true).apply();}
     ArrayList<String> x=r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-    if(x!=null){
-      for(String candidate:x){
-        if(extractCommand(candidate)!=null){command(candidate);break;}
-      }
-    }
-    if(continuousListening()) scheduleRecognitionRestart(650);
-    else stopSelf();
+    if(x!=null){for(String candidate:x){if(extractCommand(candidate)!=null){command(candidate);break;}}}
+    if(continuousListening())scheduleRecognitionRestart(650);else stopSelf();
   }
 
   public void onError(int e){
     if(!running)return;
+    consecutiveErrors++;
     if(!continuousListening()){stopSelf();return;}
     if(getSharedPreferences("axtor_voice",0).getBoolean("prefer_offline",true) && !onlineFallback){
       onlineFallback=true;
@@ -163,7 +154,8 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     }
     onlineFallback=false;
     getSharedPreferences("axtor_voice",0).edit().putBoolean("prefer_offline",true).apply();
-    scheduleRecognitionRestart(800);
+    long delay=Math.min(5000L,800L+consecutiveErrors*300L);
+    scheduleRecognitionRestart(delay);
   }
   public void onReadyForSpeech(Bundle b){}
   public void onBeginningOfSpeech(){}
