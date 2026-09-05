@@ -91,8 +91,6 @@ public final class DeviceAutomation {
             if (l.contains("open notifications") || l.contains("show notifications")) {
                 return AxtorAccessibilityService.notifications() ? "Notifications opened." : accessibilityRequired();
             }
-            // Accept natural speech variants such as "lock the screen" and
-            // "computer, lock my phone" after the calling phrase is removed.
             if (l.contains("lock screen") || l.contains("lock the screen") ||
                     l.contains("lock my screen") || l.contains("lock my phone") ||
                     l.contains("lock the phone") || l.equals("lock phone") ||
@@ -113,9 +111,10 @@ public final class DeviceAutomation {
                 return "Voice input settings opened.";
             }
             if (l.contains("open notification settings") || l.contains("notification settings")) {
-                context.startActivity(new Intent(Settings.ACTION_ALL_APPS_SETTINGS)
+                Intent notificationSettings = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                         .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(notificationSettings);
                 return "Notification settings opened.";
             }
 
@@ -141,14 +140,18 @@ public final class DeviceAutomation {
                 else if(key.equals("display")||key.equals("display_settings")) action=Settings.ACTION_DISPLAY_SETTINGS;
                 else if(key.equals("battery")||key.equals("battery_settings")) action=Settings.ACTION_BATTERY_SAVER_SETTINGS;
                 else if(key.equals("accessibility")||key.equals("accessibility_settings")) action=Settings.ACTION_ACCESSIBILITY_SETTINGS;
-                else if(key.equals("notification")||key.equals("notification_settings")) action=Settings.ACTION_ALL_APPS_SETTINGS;
+                else if(key.equals("notification")||key.equals("notification_settings")) action=Settings.ACTION_APP_NOTIFICATION_SETTINGS;
                 else if(key.equals("app")||key.equals("app_settings")) action=Settings.ACTION_APPLICATION_SETTINGS;
                 else if(key.equals("language")||key.equals("language_settings")) action=Settings.ACTION_LOCALE_SETTINGS;
                 else if(key.equals("date")||key.equals("date_settings")) action=Settings.ACTION_DATE_SETTINGS;
                 else if(key.equals("developer")||key.equals("developer_settings")) action=Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS;
                 else if(key.equals("security")||key.equals("security_settings")) action=Settings.ACTION_SECURITY_SETTINGS;
                 if(action!=null){
-                    context.startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    Intent settingsIntent = new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (action.equals(Settings.ACTION_APP_NOTIFICATION_SETTINGS)) {
+                        settingsIntent.putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName());
+                    }
+                    context.startActivity(settingsIntent);
                     return "Settings opened.";
                 }
                 return "That Android setting is not supported by this version of Axtor.";
