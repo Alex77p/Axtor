@@ -1,6 +1,7 @@
 package com.ayushdebbarma.myaiagent;
 
 import android.content.Context;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /** End-to-end bounded repair state machine. Repository CI remains the source of truth for builds. */
@@ -13,7 +14,7 @@ public final class RepairLoop {
         String c = component == null || component.trim().isEmpty() ? "unknown" : component.trim();
         String e = error == null || error.trim().isEmpty() ? "unknown failure" : error.trim();
         AutonomousRepairEngine.recordFailure(context, c, e);
-        JSONObject plan = SelfImprovementPlanner.plan("Repair " + c + ": " + e);
+        JSONArray plan = SelfImprovementPlanner.plan("Repair " + c + ": " + e);
         JSONObject state = new JSONObject();
         try {
             state.put("status", "diagnosed");
