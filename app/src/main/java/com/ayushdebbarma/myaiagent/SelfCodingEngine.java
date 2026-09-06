@@ -3,13 +3,34 @@ package com.ayushdebbarma.myaiagent;
 import android.content.Context;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import org.json.JSONObject;
 
-/** Bounded self-coding proposal generator with an optional verified GitHub execution bridge. */
+/** Bounded self-coding proposal generator with an explicit allowlist for verified GitHub execution. */
 public final class SelfCodingEngine {
     private static final String PREF = "axtor_self_coding";
     private static final String KEY = "proposal";
     private static final int MAX_BODY = 48000;
+    private static final Set<String> SAFE_TARGETS = new HashSet<>(Arrays.asList(
+            "app/src/main/java/com/ayushdebbarma/myaiagent/AxtorAgent.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/AgentExecutionVerifier.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/ComponentRegistry.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/DeviceAutomation.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/HybridAiRouter.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/RepairLoop.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/SelfCodingEngine.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/SelfImprovementExecutor.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/SelfImprovementPlanner.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/SelfModificationOrchestrator.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/AutonomousRepairCoordinator.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/GitHubRepairClient.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/RepairJobStore.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/AxtorDiagnostics.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/AppCore.java",
+            "app/src/main/java/com/ayushdebbarma/myaiagent/LlamaRuntime.kt"
+    ));
     private SelfCodingEngine() {}
 
     public static JSONObject propose(Context context, String goal, String targetPath, String replacement) {
@@ -27,7 +48,7 @@ public final class SelfCodingEngine {
             out.put("status", "proposed");
             out.put("createdAt", System.currentTimeMillis());
             context.getSharedPreferences(PREF, 0).edit().putString(KEY, out.toString()).apply();
-            ComponentRegistry.register(context, "self-coding", "2", "proposed");
+            ComponentRegistry.register(context, "self-coding", "3", "proposed");
         } catch (Exception e) {
             try { out.put("status", "rejected").put("error", e.getMessage()); } catch (Exception ignored) {}
         }
@@ -54,9 +75,7 @@ public final class SelfCodingEngine {
 
     public static boolean isSafeSourcePath(String path) {
         if (path == null || path.isEmpty() || path.length() > 240 || path.contains("..") || path.startsWith("/")) return false;
-        if (!(path.startsWith("app/src/main/") || path.startsWith("app/src/test/") || path.startsWith("app/src/androidTest/"))) return false;
-        if (path.contains("AndroidManifest.xml")) return false;
-        return path.endsWith(".java") || path.endsWith(".kt") || path.endsWith(".xml") || path.endsWith(".json");
+        return SAFE_TARGETS.contains(path);
     }
 
     private static String sha256(String value) throws Exception {
