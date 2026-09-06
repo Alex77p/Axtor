@@ -13,6 +13,11 @@ jobs:
   build:
     name: Build Axtor
     runs-on: ubuntu-latest
+    env:
+      AXTOR_KEYSTORE_BASE64: ${{ secrets.AXTOR_KEYSTORE_BASE64 }}
+      AXTOR_KEYSTORE_PASSWORD: ${{ secrets.AXTOR_KEYSTORE_PASSWORD }}
+      AXTOR_KEY_ALIAS: ${{ secrets.AXTOR_KEY_ALIAS }}
+      AXTOR_KEY_PASSWORD: ${{ secrets.AXTOR_KEY_PASSWORD }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -30,12 +35,7 @@ jobs:
           sdkmanager "build-tools;35.0.0"
           yes | sdkmanager --licenses || true
       - name: Configure stable signing key when repository secrets are available
-        if: ${{ secrets.AXTOR_KEYSTORE_BASE64 != '' && secrets.AXTOR_KEYSTORE_PASSWORD != '' && secrets.AXTOR_KEY_ALIAS != '' && secrets.AXTOR_KEY_PASSWORD != '' }}
-        env:
-          AXTOR_KEYSTORE_BASE64: ${{ secrets.AXTOR_KEYSTORE_BASE64 }}
-          AXTOR_KEYSTORE_PASSWORD: ${{ secrets.AXTOR_KEYSTORE_PASSWORD }}
-          AXTOR_KEY_ALIAS: ${{ secrets.AXTOR_KEY_ALIAS }}
-          AXTOR_KEY_PASSWORD: ${{ secrets.AXTOR_KEY_PASSWORD }}
+        if: ${{ env.AXTOR_KEYSTORE_BASE64 != '' && env.AXTOR_KEYSTORE_PASSWORD != '' && env.AXTOR_KEY_ALIAS != '' && env.AXTOR_KEY_PASSWORD != '' }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/signing"
           printf '%s' "$AXTOR_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/signing/axtor-release.jks"
