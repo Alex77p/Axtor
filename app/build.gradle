@@ -7,8 +7,26 @@ android {
         applicationId 'com.ayushdebbarma.myaiagent'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '1.2.0'
+        versionCode 4
+        versionName '1.3.0'
+    }
+    signingConfigs {
+        release {
+            def ks = System.getenv('AXTOR_KEYSTORE_FILE')
+            if (ks != null && !ks.isEmpty() && file(ks).exists()) {
+                storeFile = file(ks)
+                storePassword = System.getenv('AXTOR_KEYSTORE_PASSWORD')
+                keyAlias = System.getenv('AXTOR_KEY_ALIAS')
+                keyPassword = System.getenv('AXTOR_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            def hasStableKey = System.getenv('AXTOR_KEYSTORE_FILE') != null && !System.getenv('AXTOR_KEYSTORE_FILE').isEmpty()
+            signingConfig = hasStableKey ? signingConfigs.release : signingConfigs.debug
+            minifyEnabled false
+        }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = '17' }
