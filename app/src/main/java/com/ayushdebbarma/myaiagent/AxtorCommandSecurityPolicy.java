@@ -5,11 +5,31 @@ import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Lowest-level policy for commands arriving from hands-free voice. */
+/** Lowest-level policy for commands arriving from hands-free voice and snap triggers. */
 public final class AxtorCommandSecurityPolicy {
     private AxtorCommandSecurityPolicy() {}
 
     public static String authorizeVoice(Context context, String command) {
+        return authorize(context, command, false);
+    }
+
+    /** Snap triggers use a stricter fixed allow-list; they must never become an arbitrary command bridge. */
+    public static String authorizeSnap(Context context, String command) {
+        String base = authorize(context, command, true);
+        if (!"OK".equals(base)) return base;
+        String l = command == null ? "" : command.trim().toLowerCase(Locale.ROOT);
+        if (l.equals("go home") || l.equals("home") || l.equals("go back") || l.equals("back")
+                || l.equals("mute") || l.equals("unmute") || l.equals("volume down") || l.equals("volume up")
+                || l.equals("lock screen") || l.equals("lock phone") || l.equals("lock device")
+                || l.equals("wake screen") || l.equals("wake screen up")
+                || l.equals("stop all") || l.equals("stop automation") || l.equals("cancel automation")
+                || l.equals("stop sound triggers") || l.equals("disable sound triggers")
+                || l.equals("open settings") || l.equals("open wifi") || l.equals("open bluetooth")
+                || l.equals("open notification settings") || l.equals("open app settings")) return "OK";
+        return "SNAP_ACTION_NOT_ALLOWLISTED";
+    }
+
+    private static String authorize(Context context, String command, boolean snap) {
         String q = command == null ? "" : command.trim();
         String l = q.toLowerCase(Locale.ROOT);
         if (q.isEmpty()) return "EMPTY_COMMAND";
@@ -25,8 +45,8 @@ public final class AxtorCommandSecurityPolicy {
         if (l.contains("volume") || l.equals("mute") || l.equals("unmute") || l.contains("lock screen") || l.equals("lock phone") || l.equals("lock device")) return "OK";
         if (l.equals("wake screen") || l.equals("wake screen up")) return "OK";
         if (l.equals("open settings") || l.contains("open wifi") || l.contains("open bluetooth") || l.contains("voice input settings") || l.contains("notification settings") || l.contains("app settings")) return "OK";
-        if (l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ") || l.startsWith("show ") || l.startsWith("go to ")) return "OK";
-        if (l.startsWith("set alarm") || l.startsWith("set an alarm")) return "OK";
+        if (l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ") || l.startsWith("show ") || l.startsWith("go to ")) return snap ? "SNAP_ACTION_NOT_ALLOWLISTED" : "OK";
+        if (l.startsWith("set alarm") || l.startsWith("set an alarm")) return snap ? "SNAP_ACTION_NOT_ALLOWLISTED" : "OK";
         if (l.equals("stop all") || l.equals("stop automation") || l.equals("cancel automation")) return "OK";
         if (l.equals("stop sound triggers") || l.equals("disable sound triggers") || l.equals("open sound trigger settings")) return "OK";
         if (l.equals("start sound triggers") || l.equals("enable sound triggers") || l.equals("sound trigger start")) return "SECURITY_CONFIRMATION_REQUIRED";
