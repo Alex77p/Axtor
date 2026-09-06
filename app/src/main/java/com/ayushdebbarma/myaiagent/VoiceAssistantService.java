@@ -10,11 +10,11 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import java.util.*;
 
-/** Foreground voice-command service. No calling phrase, snap gate, or online AI fallback. */
+/** Foreground voice-command service. No calling phrase. Optional personalized snap patterns can execute safe commands directly. */
 public class VoiceAssistantService extends Service implements RecognitionListener, TextToSpeech.OnInitListener {
   static final int ID=71;
   private static final String PREF="axtor_voice";
-  SpeechRecognizer recognizer; Intent recognizerIntent; TextToSpeech tts;
+  SpeechRecognizer recognizer; Intent recognizerIntent; TextToSpeech tts; SnapTriggerEngine snapEngine;
   boolean running=false,ttsReady=false;
   final Handler handler=new Handler(Looper.getMainLooper());
   boolean restartScheduled=false,usingOnDevice=false; int consecutiveErrors=0;
@@ -35,13 +35,27 @@ public class VoiceAssistantService extends Service implements RecognitionListene
       public void onDone(String id){if(running&&continuousListening())scheduleRecognitionRestart(250);}
       public void onError(String id){if(running&&continuousListening())scheduleRecognitionRestart(250);}
     });
-    startRecognition();
+    if(snapPatternMode()){startSnapMode();}else startRecognition();
   }
 
   private boolean continuousListening(){return getSharedPreferences(PREF,0).getBoolean("continuous_listening",true);}
+  private boolean snapPatternMode(){return getSharedPreferences(PREF,0).getBoolean("snap_command_patterns_enabled",false)&&SnapTriggerEngine.isEnrolled(this);}
+  private void startSnapMode(){
+    if(snapEngine!=null)return;
+    pauseRecognition();
+    snapEngine=new SnapTriggerEngine(this,new SnapTriggerEngine.Listener(){
+      public void onSnap(){
+        // Single personalized snap is the hands-free listen trigger; double/quad patterns execute directly.
+        startRecognition();
+      }
+      public void onDiagnostic(String message){rememberVoiceError(message);}
+    });
+    snapEngine.start();
+  }
+  private void stopSnapMode(){if(snapEngine!=null){snapEngine.stop();snapEngine=null;}}
 
   void startRecognition(){
-    if(!running||restartScheduled)return;
+    if(!running||restartScheduled||snapPatternMode())return;
     restartScheduled=false;
     if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){rememberVoiceError("MIC_PERMISSION_MISSING");stopSelf();return;}
     if(!SpeechRecognizer.isRecognitionAvailable(this)){rememberVoiceError("SPEECH_RECOGNIZER_UNAVAILABLE");stopSelf();return;}
@@ -63,6 +77,18 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   void command(String q){
     String cmd=VoiceCommandManager.normalize(q);
     if(cmd.isEmpty()){scheduleRecognitionRestart(250);return;}
+    String lower=cmd.toLowerCase(Locale.ROOT);
+    if(lower.equals("enable snap commands")||lower.equals("enable snap command mode")){
+      if(!SnapTriggerEngine.isEnrolled(this)){say("Enroll your personal snap first.");return;}
+      getSharedPreferences(PREF,0).edit().putBoolean("snap_command_patterns_enabled",true).apply();
+      say("Snap command patterns enabled.");
+      return;
+    }
+    if(lower.equals("disable snap commands")||lower.equals("disable snap command mode")){
+      getSharedPreferences(PREF,0).edit().putBoolean("snap_command_patterns_enabled",false).apply();
+      stopSnapMode(); startRecognition(); say("Snap command patterns disabled.");
+      return;
+    }
     String policy=AxtorCommandSecurityPolicy.authorizeVoice(this,cmd);
     if(!"OK".equals(policy)){rememberVoiceError("VOICE_BLOCKED:"+policy);say("That command is blocked by Axtor security policy.");return;}
     getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",true).putString("voice_last_route","axtor-agent").apply();
@@ -75,11 +101,11 @@ public class VoiceAssistantService extends Service implements RecognitionListene
 
   private void rememberVoiceError(String value){getSharedPreferences("axtor",0).edit().putString("voice_last_error",value).apply();}
   private void pauseRecognition(){restartScheduled=false;if(recognizer!=null){try{recognizer.cancel();}catch(Exception ignored){}}}
-  void scheduleRecognitionRestart(long delay){if(!running||!continuousListening()||restartScheduled)return;restartScheduled=true;handler.postDelayed(this::startRecognition,delay);}
+  void scheduleRecognitionRestart(long delay){if(!running||!continuousListening()||restartScheduled||snapPatternMode())return;restartScheduled=true;handler.postDelayed(this::startRecognition,delay);}
 
   void say(String s){
     if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty()){pauseRecognition();tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor-"+System.nanoTime());}
-    else if(running&&continuousListening())scheduleRecognitionRestart(500);
+    else if(running&&continuousListening()&&!snapPatternMode())scheduleRecognitionRestart(500);
   }
 
   void sayResponse(String text){
@@ -98,11 +124,11 @@ public class VoiceAssistantService extends Service implements RecognitionListene
       getSharedPreferences(PREF,0).edit().putBoolean("continuous_listening",false).apply();
       stopSelf(); return START_NOT_STICKY;
     }
-    running=true; VoiceServiceState.setRunning(true); if(recognizer==null)startRecognition(); return START_STICKY;
+    running=true; VoiceServiceState.setRunning(true); if(snapPatternMode()){startSnapMode();}else if(recognizer==null)startRecognition(); return START_STICKY;
   }
 
   public void onDestroy(){
-    running=false; if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}} recognizer=null;
+    running=false; stopSnapMode(); if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}} recognizer=null;
     ttsReady=false; handler.removeCallbacksAndMessages(null); if(tts!=null){tts.stop();tts.shutdown();}
     VoiceServiceState.setRunning(false); super.onDestroy();
   }
@@ -116,7 +142,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
   public void onError(int e){
     if(!running)return; consecutiveErrors++; rememberVoiceError("SPEECH_ERROR_"+e);
-    if(!continuousListening()){stopSelf();return;}
+    if(!continuousListening()||snapPatternMode()){if(snapPatternMode())startSnapMode();else stopSelf();return;}
     scheduleRecognitionRestart(Math.min(5000L,500L+consecutiveErrors*300L));
   }
   public void onReadyForSpeech(Bundle b){} public void onBeginningOfSpeech(){} public void onRmsChanged(float v){} public void onBufferReceived(byte[] b){} public void onEndOfSpeech(){} public void onPartialResults(Bundle b){} public void onEvent(int a,Bundle b){}
