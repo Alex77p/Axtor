@@ -65,8 +65,16 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   void startRecognition(){
     if(!running || restartScheduled)return;
     restartScheduled=false;
-    if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){stopSelf();return;}
-    if(!SpeechRecognizer.isRecognitionAvailable(this)){stopSelf();return;}
+    if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){
+      rememberVoiceError("MIC_PERMISSION_MISSING");
+      say("Voice is unavailable. Main cause: microphone permission is missing.");
+      stopSelf(); return;
+    }
+    if(!SpeechRecognizer.isRecognitionAvailable(this)){
+      rememberVoiceError("SPEECH_RECOGNIZER_UNAVAILABLE");
+      say("Voice is unavailable. Main cause: no speech recognition service is installed.");
+      stopSelf(); return;
+    }
     if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}recognizer=null;}
     if(Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){
       recognizer=SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
@@ -82,7 +90,10 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     boolean preferOffline=getSharedPreferences("axtor_voice",0).getBoolean("prefer_offline",true);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,preferOffline || usingOnDevice);
     recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);
-    try{recognizer.startListening(recognizerIntent);}catch(Exception e){scheduleRecognitionRestart(1200);}
+    try{recognizer.startListening(recognizerIntent);}catch(Exception e){
+      rememberVoiceError("RECOGNIZER_START_FAILED:"+e.getClass().getSimpleName());
+      scheduleRecognitionRestart(1200);
+    }
   }
 
   String extractCommand(String q){return VoiceCommandManager.extractCommand(this,q);}
@@ -93,10 +104,32 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     if(cmd.isEmpty()){say("Say your calling phrase followed by a command.");return;}
     getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",true).apply();
     pauseRecognition();
+
+    // Deterministic web-search intent: never make the LLM guess how to open search.
+    String searchQuery=WebSearchProtocol.extractQuery(cmd);
+    if(searchQuery!=null){
+      String result=WebSearchProtocol.search(this,searchQuery);
+      getSharedPreferences("axtor",0).edit()
+          .putBoolean("voice_last_command_ok",!result.contains("failed"))
+          .putString("voice_last_route","web-search")
+          .putString("voice_last_error",result.contains("failed")?result:"")
+          .apply();
+      sayResponse(result);
+      return;
+    }
+
+    getSharedPreferences("axtor",0).edit().putString("voice_last_route","axtor-agent").apply();
     AxtorAgent.handle(this,cmd,new AxtorAgent.Callback(){
       @Override public void onReply(String text){sayResponse(text);}
-      @Override public void onError(String message){say(message);}
+      @Override public void onError(String message){
+        rememberVoiceError("AGENT_ERROR:"+(message==null?"unknown":message));
+        say("Command failed. Main cause: "+(message==null?"unknown error":message));
+      }
     });
+  }
+
+  private void rememberVoiceError(String value){
+    getSharedPreferences("axtor",0).edit().putString("voice_last_error",value).apply();
   }
 
   void say(String s){
@@ -151,7 +184,10 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   public android.os.IBinder onBind(Intent i){return null;}
-  public void onInit(int status){ttsReady=(status==TextToSpeech.SUCCESS);}
+  public void onInit(int status){
+    ttsReady=(status==TextToSpeech.SUCCESS);
+    if(!ttsReady) rememberVoiceError("TTS_UNAVAILABLE");
+  }
 
   public void onResults(Bundle r){
     consecutiveErrors=0;
@@ -164,6 +200,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   public void onError(int e){
     if(!running)return;
     consecutiveErrors++;
+    rememberVoiceError("SPEECH_ERROR_"+e);
     if(!continuousListening()){stopSelf();return;}
     if(getSharedPreferences("axtor_voice",0).getBoolean("prefer_offline",true) && !onlineFallback){
       onlineFallback=true;
