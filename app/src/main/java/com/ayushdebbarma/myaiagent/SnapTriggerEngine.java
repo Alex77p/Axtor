@@ -6,7 +6,9 @@ import android.content.SharedPreferences;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 /**
@@ -14,6 +16,10 @@ import java.util.List;
  * A trigger is accepted only when the transient shape is snap-like AND, when
  * enrolled, its acoustic fingerprint is sufficiently close to the owner's
  * enrolled snap samples. Ordinary speech/noise is rejected before ASR starts.
+ *
+ * Three enrolled snap-like transients inside the emergency window immediately
+ * latch the global emergency stop. The emergency sequence is intentionally
+ * handled locally and does not depend on speech recognition or the AI model.
  */
 public final class SnapTriggerEngine {
     public interface Listener { void onSnap(); void onDiagnostic(String message); }
@@ -22,16 +28,23 @@ public final class SnapTriggerEngine {
     private static final int RATE=16000;
     private static final int FRAME=512;
     private static final long COOLDOWN_MS=1400;
+    private static final long EMERGENCY_WINDOW_MS=2200;
+    private static final int EMERGENCY_SNAP_COUNT=3;
     private final Context context;
     private volatile boolean running;
+    private volatile boolean emergencyOnly;
     private Thread thread;
     private final Listener listener;
     private long lastTrigger;
+    private final Deque<Long> recentSnaps=new ArrayDeque<>();
 
     public SnapTriggerEngine(Context c, Listener l){context=c.getApplicationContext();listener=l;}
 
     public boolean isEnrolled(){return !context.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
     public static boolean isEnrolled(Context c){return !c.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
+
+    /** During active automation, listen only for the emergency triple-snap sequence. */
+    public void setEmergencyOnly(boolean value){emergencyOnly=value; synchronized(recentSnaps){recentSnaps.clear();}}
 
     public void start(){
         if(running)return;
@@ -40,9 +53,9 @@ public final class SnapTriggerEngine {
         thread=new Thread(this::loop,"AxtorSnapDetector");
         thread.start();
     }
-    public void stop(){running=false;if(thread!=null){try{thread.interrupt();}catch(Exception ignored){}}thread=null;}
+    public void stop(){running=false;if(thread!=null){try{thread.interrupt();}catch(Exception ignored){}}thread=null;synchronized(recentSnaps){recentSnaps.clear();}}
 
-    private void loop(){
+    private loop(){
         int min=AudioRecord.getMinBufferSize(RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
         if(min<=0){listener.onDiagnostic("SNAP_AUDIO_UNAVAILABLE");running=false;return;}
         int size=Math.max(min,FRAME*4);
@@ -55,14 +68,30 @@ public final class SnapTriggerEngine {
                 int n=r.read(buf,0,buf.length);
                 if(n==buf.length){
                     Features f=features(buf,n);
-                    if(isSnapLike(f) && matchesTemplate(f) && System.currentTimeMillis()-lastTrigger>COOLDOWN_MS){
-                        lastTrigger=System.currentTimeMillis();
-                        listener.onSnap();
+                    if(isSnapLike(f) && matchesTemplate(f)){
+                        long now=System.currentTimeMillis();
+                        if(now-lastTrigger>COOLDOWN_MS){
+                            lastTrigger=now;
+                            if(recordEmergencySnap(now)){
+                                EmergencyStopController.request(context);
+                                return;
+                            }
+                            if(!emergencyOnly) listener.onSnap();
+                        }
                     }
                 }
             }
         }catch(Throwable t){listener.onDiagnostic("SNAP_DETECTOR_ERROR:"+t.getClass().getSimpleName());}
         finally{if(r!=null){try{r.stop();}catch(Exception ignored){}try{r.release();}catch(Exception ignored){}}}
+    }
+
+    private boolean recordEmergencySnap(long now){
+        synchronized(recentSnaps){
+            while(!recentSnaps.isEmpty() && now-recentSnaps.peekFirst()>EMERGENCY_WINDOW_MS)recentSnaps.removeFirst();
+            recentSnaps.addLast(now);
+            while(recentSnaps.size()>EMERGENCY_SNAP_COUNT)recentSnaps.removeFirst();
+            return recentSnaps.size()>=EMERGENCY_SNAP_COUNT;
+        }
     }
 
     /** Capture three short snap samples and store only feature vectors, not recordings. */
@@ -95,7 +124,6 @@ public final class SnapTriggerEngine {
         if(raw.isEmpty())return false;try{String[] a=raw.split(",");double[] t=new double[a.length];for(int i=0;i<a.length;i++)t[i]=Double.parseDouble(a[i]);double sim=similarity(f.vector(),t);return sim>=p.getFloat("threshold",0.86f);}catch(Exception e){return false;}}
 
     private static boolean isSnapLike(Features f){
-        // Finger snaps are brief transients with high peak/crest factor and strong HF content.
         return f.peak>0.30 && f.crest>4.0 && f.hf>0.30 && f.durationMs<180 && f.zcr>0.04;
     }
 
@@ -111,6 +139,7 @@ public final class SnapTriggerEngine {
     private static final class Features{
         final double peak,crest,hf,zcr,durationMs,rms;
         Features(double p,double c,double h,double z,double d,double r){peak=p;crest=c;hf=h;zcr=z;durationMs=d;rms=r;}
-        double[] vector(){return new double[]{peak,crest/10.0,hf,zcr*10.0,durationMs/100.0,rms*10.0};}
+        double[] vector(){return new double[]{peak,crest/10.0,hf,zcr*10.0,durationMs/100.0,rms*10.0};
+        }
     }
 }
