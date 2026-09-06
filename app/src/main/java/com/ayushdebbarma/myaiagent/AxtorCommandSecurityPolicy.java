@@ -13,11 +13,28 @@ public final class AxtorCommandSecurityPolicy {
         return authorize(context, command, false);
     }
 
-    /** Snap triggers use a stricter fixed allow-list; they must never become an arbitrary command bridge. */
+    /** Snap triggers use a strict fixed allow-list and never become an arbitrary command bridge. */
     public static String authorizeSnap(Context context, String command) {
-        String base = authorize(context, command, true);
+        String q = command == null ? "" : command.trim();
+        String l = q.toLowerCase(Locale.ROOT);
+        if (q.isEmpty()) return "EMPTY_COMMAND";
+
+        // Snap input is never allowed to invoke a shell, intent, package manager, URL, or
+        // other command interpreter, even if a future allow-list entry accidentally matches.
+        if (l.matches(".*\\b(intent|shell|adb|am|pm|su|terminal|exec|command line)\\b.*")
+                || l.startsWith("url ") || l.matches(".*https?://.*")) {
+            return "ARBITRARY_EXECUTION_BLOCKED";
+        }
+        if (l.matches(".*\\b(unlock|bypass.*lock|disable.*security|turn off.*security|remove.*protection)\\b.*")) {
+            return "SECURITY_BYPASS_BLOCKED";
+        }
+        if (l.matches(".*\\b(install|uninstall|factory reset|wipe data|erase device|delete all data)\\b.*")) {
+            return "DESTRUCTIVE_ACTION_REQUIRES_UI";
+        }
+
+        String base = authorize(context, q, true);
         if (!"OK".equals(base)) return base;
-        String l = command == null ? "" : command.trim().toLowerCase(Locale.ROOT);
+
         if (l.equals("go home") || l.equals("home") || l.equals("go back") || l.equals("back")
                 || l.equals("mute") || l.equals("unmute") || l.equals("volume down") || l.equals("volume up")
                 || l.equals("lock screen") || l.equals("lock phone") || l.equals("lock device")
@@ -60,6 +77,7 @@ public final class AxtorCommandSecurityPolicy {
     }
 
     private static boolean matchesSavedFlow(Context context, String input) {
+        if (context == null) return false;
         try {
             JSONArray saved = new JSONArray(context.getSharedPreferences("myaiagent", 0).getString("flows", "[]"));
             String normalized = normalize(input);
