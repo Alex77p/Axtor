@@ -18,23 +18,13 @@ public final class AxtorCommandSecurityPolicy {
         String q = command == null ? "" : command.trim();
         String l = q.toLowerCase(Locale.ROOT);
         if (q.isEmpty()) return "EMPTY_COMMAND";
-
-        // Snap input is never allowed to invoke a shell, intent, package manager, URL, or
-        // other command interpreter, even if a future allow-list entry accidentally matches.
-        if (l.matches(".*\\b(intent|shell|adb|am|pm|su|terminal|exec|command line)\\b.*")
-                || l.startsWith("url ") || l.matches(".*https?://.*")) {
-            return "ARBITRARY_EXECUTION_BLOCKED";
-        }
-        if (l.matches(".*\\b(unlock|bypass.*lock|disable.*security|turn off.*security|remove.*protection)\\b.*")) {
-            return "SECURITY_BYPASS_BLOCKED";
-        }
-        if (l.matches(".*\\b(install|uninstall|factory reset|wipe data|erase device|delete all data)\\b.*")) {
-            return "DESTRUCTIVE_ACTION_REQUIRES_UI";
-        }
+        if (l.matches(".*\\b(intent|shell|adb|pm|su|terminal|exec|command line)\\b.*")
+                || l.startsWith("url ") || l.matches(".*https?://.*")) return "ARBITRARY_EXECUTION_BLOCKED";
+        if (l.matches(".*\\b(unlock|bypass.*lock|disable.*security|turn off.*security|remove.*protection)\\b.*")) return "SECURITY_BYPASS_BLOCKED";
+        if (l.matches(".*\\b(install|uninstall|factory reset|wipe data|erase device|delete all data)\\b.*")) return "DESTRUCTIVE_ACTION_REQUIRES_UI";
 
         String base = authorize(context, q, true);
         if (!"OK".equals(base)) return base;
-
         if (l.equals("go home") || l.equals("home") || l.equals("go back") || l.equals("back")
                 || l.equals("mute") || l.equals("unmute") || l.equals("volume down") || l.equals("volume up")
                 || l.equals("lock screen") || l.equals("lock phone") || l.equals("lock device")
