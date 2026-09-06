@@ -18,8 +18,8 @@ import java.util.List;
  * enrolled snap samples. Ordinary speech/noise is rejected before ASR starts.
  *
  * Three enrolled snap-like transients inside the emergency window immediately
- * latch the global emergency stop. The emergency sequence is intentionally
- * handled locally and does not depend on speech recognition or the AI model.
+ * latch the global emergency stop. Once a normal snap arms a command, the
+ * detector stays in emergency-only mode while voice/AI execution is active.
  */
 public final class SnapTriggerEngine {
     public interface Listener { void onSnap(); void onDiagnostic(String message); }
@@ -41,13 +41,25 @@ public final class SnapTriggerEngine {
     public SnapTriggerEngine(Context c, Listener l){context=c.getApplicationContext();listener=l;}
     public boolean isEnrolled(){return !context.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
     public static boolean isEnrolled(Context c){return !c.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
+    /** Arm only the emergency watcher while a command is being executed. */
     public void setEmergencyOnly(boolean value){emergencyOnly=value;synchronized(recentSnaps){recentSnaps.clear();}}
     public void start(){
-        if(running)return;
+        if(running){emergencyOnly=false;synchronized(recentSnaps){recentSnaps.clear();}return;}
         if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=0){listener.onDiagnostic("SNAP_MIC_PERMISSION_MISSING");return;}
-        running=true;thread=new Thread(this::loop,"AxtorSnapDetector");thread.start();
+        running=true;emergencyOnly=false;thread=new Thread(this::loop,"AxtorSnapDetector");thread.start();
     }
-    public void stop(){running=false;if(thread!=null){try{thread.interrupt();}catch(Exception ignored){}}thread=null;synchronized(recentSnaps){recentSnaps.clear();}}
+    /**
+     * A stop requested after a recognized snap leaves the microphone watcher in
+     * emergency-only mode. It self-terminates when the voice service actually
+     * dies, preventing a second independent long-lived microphone service.
+     */
+    public void stop(){
+        if(emergencyOnly && VoiceServiceState.isRunning()){
+            synchronized(recentSnaps){recentSnaps.clear();}
+            return;
+        }
+        running=false;if(thread!=null){try{thread.interrupt();}catch(Exception ignored){}}thread=null;synchronized(recentSnaps){recentSnaps.clear();}
+    }
     private void loop(){
         int min=AudioRecord.getMinBufferSize(RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
         if(min<=0){listener.onDiagnostic("SNAP_AUDIO_UNAVAILABLE");running=false;return;}
@@ -57,6 +69,7 @@ public final class SnapTriggerEngine {
             if(r.getState()!=AudioRecord.STATE_INITIALIZED){listener.onDiagnostic("SNAP_AUDIO_INIT_FAILED");running=false;return;}
             short[] buf=new short[FRAME];r.startRecording();
             while(running){
+                if(!VoiceServiceState.isRunning()){running=false;break;}
                 int n=r.read(buf,0,buf.length);
                 if(n==buf.length){
                     Features f=features(buf,n);
@@ -65,7 +78,7 @@ public final class SnapTriggerEngine {
                         if(now-lastTrigger>COOLDOWN_MS){
                             lastTrigger=now;
                             if(recordEmergencySnap(now)){EmergencyStopController.request(context);return;}
-                            if(!emergencyOnly)listener.onSnap();
+                            if(!emergencyOnly){emergencyOnly=true;listener.onSnap();}
                         }
                     }
                 }
