@@ -8,104 +8,116 @@ import android.os.*;
 import android.speech.*;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
-import java.security.KeyStore;
-import java.security.Signature;
 import java.util.*;
 
-/** Foreground, restart-tolerant hands-free voice service with layered owner authorization. */
+/** Foreground voice-command service. No calling phrase, snap gate, or online AI fallback. */
 public class VoiceAssistantService extends Service implements RecognitionListener, TextToSpeech.OnInitListener {
   static final int ID=71;
   private static final String PREF="axtor_voice";
-  private static final String OWNER_ALIAS="axtor_owner_ec_v1";
-  private static final long OWNER_CHALLENGE_TTL_MS=30000L;
-  private static final long OWNER_SESSION_TTL_MS=10*60*1000L;
   SpeechRecognizer recognizer; Intent recognizerIntent; TextToSpeech tts;
-  boolean running=false,ttsReady=false,awaitingSnapCommand=false,enrolling=false;
+  boolean running=false,ttsReady=false;
   final Handler handler=new Handler(Looper.getMainLooper());
-  boolean restartScheduled=false,onlineFallback=false,usingOnDevice=false; int consecutiveErrors=0;
-  SnapTriggerEngine snapDetector;
+  boolean restartScheduled=false,usingOnDevice=false; int consecutiveErrors=0;
 
   @Override public void onCreate(){
-    super.onCreate();running=true;VoiceServiceState.setRunning(true);
+    super.onCreate(); running=true; VoiceServiceState.setRunning(true);
     NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
-    if(Build.VERSION.SDK_INT>=26)nm.createNotificationChannel(new NotificationChannel("voice","Axtor Voice",NotificationManager.IMPORTANCE_LOW));
-    Intent stop=new Intent(this,VoiceAssistantService.class);stop.setAction("STOP");
+    if(Build.VERSION.SDK_INT>=26) nm.createNotificationChannel(new NotificationChannel("voice","Axtor Voice",NotificationManager.IMPORTANCE_LOW));
+    Intent stop=new Intent(this,VoiceAssistantService.class); stop.setAction("STOP");
     PendingIntent pi=PendingIntent.getService(this,1,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,"voice"):new Notification.Builder(this);
-    b.setContentTitle("Axtor voice assistant").setContentText(handsFreeModeText()).setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true).addAction(new Notification.Action.Builder(null,"Stop",pi).build());
-    if(Build.VERSION.SDK_INT>=29)startForeground(ID,b.build(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);else startForeground(ID,b.build());
-    tts=new TextToSpeech(this,this);tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){public void onStart(String id){}public void onDone(String id){if(running&&continuousListening()&&!enrolling)armHandsFree();}public void onError(String id){if(running&&continuousListening()&&!enrolling)armHandsFree();}});
-    if(snapMode()&&!SnapTriggerEngine.isEnrolled(this))beginEnrollment();else armHandsFree();
+    b.setContentTitle("Axtor voice commands").setContentText("Listening for commands").setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true)
+      .addAction(new Notification.Action.Builder(null,"Stop",pi).build());
+    if(Build.VERSION.SDK_INT>=29) startForeground(ID,b.build(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE); else startForeground(ID,b.build());
+    tts=new TextToSpeech(this,this);
+    tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){
+      public void onStart(String id){}
+      public void onDone(String id){if(running&&continuousListening())scheduleRecognitionRestart(250);}
+      public void onError(String id){if(running&&continuousListening())scheduleRecognitionRestart(250);}
+    });
+    startRecognition();
   }
+
   private boolean continuousListening(){return getSharedPreferences(PREF,0).getBoolean("continuous_listening",true);}
-  private boolean snapMode(){return getSharedPreferences(PREF,0).getBoolean("snap_trigger_enabled",true);}
-  private boolean strictOwnerGate(){return getSharedPreferences(PREF,0).getBoolean("strict_owner_biometric",true);}
-  private boolean ownerSessionValid(){return System.currentTimeMillis()<getSharedPreferences("axtor",0).getLong("owner_session_until",0L);}
-  private String handsFreeModeText(){return snapMode()?"Hands-free: personalized snap + 10-minute owner session":"Hands-free: calling phrase";}
 
-  private void beginEnrollment(){
-    if(enrolling||!running)return;enrolling=true;pauseRecognition();
-    getSharedPreferences("axtor",0).edit().putString("voice_last_trigger","enrollment").putString("voice_last_error","").apply();
-    if(ttsReady)tts.speak("Snap three times. Use your normal finger snap, with a short pause between each snap. Axtor will learn this snap sound on this device.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-prompt");
-    new Thread(()->{try{Thread.sleep(ttsReady?2600:500);}catch(Exception ignored){}boolean ok=SnapTriggerEngine.enroll(this);handler.post(()->{enrolling=false;if(ok){getSharedPreferences("axtor",0).edit().putString("voice_last_error","").apply();if(ttsReady)tts.speak("Snap pattern saved. Axtor will use strong owner authorization to arm a temporary hands-free session.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-ok");armHandsFree();}else{rememberVoiceError("SNAP_ENROLLMENT_FAILED");if(ttsReady)tts.speak("I could not learn three clear snaps. Please restart voice and try again in a quiet room.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-fail");armHandsFree();}});},"AxtorSnapEnrollment").start();
+  void startRecognition(){
+    if(!running||restartScheduled)return;
+    restartScheduled=false;
+    if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){rememberVoiceError("MIC_PERMISSION_MISSING");stopSelf();return;}
+    if(!SpeechRecognizer.isRecognitionAvailable(this)){rememberVoiceError("SPEECH_RECOGNIZER_UNAVAILABLE");stopSelf();return;}
+    if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){} recognizer=null;}
+    if(Build.VERSION.SDK_INT>=31&&SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){
+      recognizer=SpeechRecognizer.createOnDeviceSpeechRecognizer(this); usingOnDevice=true;
+    }else{
+      recognizer=SpeechRecognizer.createSpeechRecognizer(this); usingOnDevice=false;
+    }
+    recognizer.setRecognitionListener(this);
+    recognizerIntent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+    recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+    recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,false);
+    recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
+    recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);
+    try{recognizer.startListening(recognizerIntent);}catch(Exception e){rememberVoiceError("RECOGNIZER_START_FAILED:"+e.getClass().getSimpleName());scheduleRecognitionRestart(1200);}
   }
-
-  private void armHandsFree(){
-    if(!running||!continuousListening()||enrolling)return;
-    awaitingSnapCommand=false;
-    if(snapMode()){
-      pauseRecognition();
-      if(snapDetector==null)snapDetector=new SnapTriggerEngine(this,new SnapTriggerEngine.Listener(){
-        public void onSnap(){
-          if(!running)return;
-          if(strictOwnerGate()&&!ownerSessionValid()){requestOwnerBiometric();return;}
-          awaitingSnapCommand=true;getSharedPreferences("axtor",0).edit().putString("voice_last_trigger","personalized_snap_authorized").apply();if(snapDetector!=null)snapDetector.stop();handler.postDelayed(()->startRecognition(),120);
-        }
-        public void onDiagnostic(String m){rememberVoiceError(m);}
-      });
-      if(!SnapTriggerEngine.isEnrolled(this)){rememberVoiceError("SNAP_NOT_ENROLLED");return;}
-      snapDetector.start();
-    }else startRecognition();
-  }
-
-  private void requestOwnerBiometric(){
-    if(snapDetector!=null)snapDetector.stop();awaitingSnapCommand=false;
-    byte[] challenge=new byte[32];new java.security.SecureRandom().nextBytes(challenge);String encoded=Base64.getEncoder().encodeToString(challenge);
-    getSharedPreferences("axtor",0).edit().putString("owner_challenge",encoded).putLong("owner_challenge_time",System.currentTimeMillis()).putString("owner_gate","pending").putString("voice_last_trigger","personalized_snap_pending_owner_session").apply();
-    try{Intent i=new Intent(this,OwnerBiometricActivity.class);i.putExtra(OwnerBiometricActivity.EXTRA_CHALLENGE,encoded);i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);startActivity(i);}catch(Exception e){rememberVoiceError("OWNER_BIOMETRIC_LAUNCH_FAILED:"+e.getClass().getSimpleName());armHandsFree();}
-  }
-
-  private boolean verifyOwnerBiometric(String challengeB64,String signatureB64){
-    try{SharedPreferences p=getSharedPreferences("axtor",0);String expected=p.getString("owner_challenge","");long when=p.getLong("owner_challenge_time",0);if(expected.isEmpty()||!expected.equals(challengeB64)||System.currentTimeMillis()-when>OWNER_CHALLENGE_TTL_MS)return false;byte[] challenge=Base64.getDecoder().decode(challengeB64);byte[] sig=Base64.getDecoder().decode(signatureB64);KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);java.security.cert.Certificate cert=ks.getCertificate(OWNER_ALIAS);if(cert==null)return false;Signature verifier=Signature.getInstance("SHA256withECDSA");verifier.initVerify(cert.getPublicKey());verifier.update(challenge);return verifier.verify(sig);}catch(Exception e){rememberVoiceError("OWNER_BIOMETRIC_VERIFY_FAILED:"+e.getClass().getSimpleName());return false;}
-  }
-  private void pauseRecognition(){restartScheduled=false;if(recognizer!=null){try{recognizer.cancel();}catch(Exception ignored){}}}
-  void startRecognition(){if(!running||restartScheduled)return;restartScheduled=false;if(checkSelfPermission("android.permission.RECORD_AUDIO")!=PackageManager.PERMISSION_GRANTED){rememberVoiceError("MIC_PERMISSION_MISSING");stopSelf();return;}if(!SpeechRecognizer.isRecognitionAvailable(this)){rememberVoiceError("SPEECH_RECOGNIZER_UNAVAILABLE");stopSelf();return;}if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}recognizer=null;}if(Build.VERSION.SDK_INT>=31&&SpeechRecognizer.isOnDeviceRecognitionAvailable(this)){recognizer=SpeechRecognizer.createOnDeviceSpeechRecognizer(this);usingOnDevice=true;}else{recognizer=SpeechRecognizer.createSpeechRecognizer(this);usingOnDevice=false;}recognizer.setRecognitionListener(this);recognizerIntent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,false);boolean preferOffline=getSharedPreferences(PREF,0).getBoolean("prefer_offline",true);recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,preferOffline||usingOnDevice);recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3);try{recognizer.startListening(recognizerIntent);}catch(Exception e){rememberVoiceError("RECOGNIZER_START_FAILED:"+e.getClass().getSimpleName());scheduleRecognitionRestart(1200);}}
-  String extractCommand(String q){return VoiceCommandManager.extractCommand(this,q);}
 
   void command(String q){
-    String cmd=awaitingSnapCommand?VoiceCommandManager.normalize(q):extractCommand(q);awaitingSnapCommand=false;
-    if(cmd==null||cmd.isEmpty()){if(!snapMode())say("Say your calling phrase followed by a command.");else say("I did not hear a command.");return;}
+    String cmd=VoiceCommandManager.normalize(q);
+    if(cmd.isEmpty()){scheduleRecognitionRestart(250);return;}
     String policy=AxtorCommandSecurityPolicy.authorizeVoice(this,cmd);
     if(!"OK".equals(policy)){rememberVoiceError("VOICE_BLOCKED:"+policy);say("That command is blocked by Axtor security policy.");return;}
-    getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",true).apply();pauseRecognition();
-    String searchQuery=WebSearchProtocol.extractQuery(cmd);
-    if(searchQuery!=null){String result=WebSearchProtocol.search(this,searchQuery);getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",!result.contains("failed")).putString("voice_last_route","web-search").putString("voice_last_error",result.contains("failed")?result:"").apply();sayResponse(result);return;}
-    getSharedPreferences("axtor",0).edit().putString("voice_last_route","axtor-agent").apply();
-    AxtorAgent.handle(this,cmd,new AxtorAgent.Callback(){public void onReply(String text){sayResponse(text);}public void onError(String message){rememberVoiceError("AGENT_ERROR:"+(message==null?"unknown":message));say("Command failed. Main cause: "+(message==null?"unknown error":message));}});
+    getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",true).putString("voice_last_route","axtor-agent").apply();
+    pauseRecognition();
+    AxtorAgent.handle(this,cmd,new AxtorAgent.Callback(){
+      public void onReply(String text){sayResponse(text);}
+      public void onError(String message){rememberVoiceError("AGENT_ERROR:"+(message==null?"unknown":message));say("Command failed: "+(message==null?"unknown error":message));}
+    });
   }
+
   private void rememberVoiceError(String value){getSharedPreferences("axtor",0).edit().putString("voice_last_error",value).apply();}
-  void say(String s){if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty()){pauseRecognition();if(snapDetector!=null)snapDetector.stop();tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor-"+System.nanoTime());}else if(running&&continuousListening())scheduleRecognitionRestart(500);}
+  private void pauseRecognition(){restartScheduled=false;if(recognizer!=null){try{recognizer.cancel();}catch(Exception ignored){}}}
   void scheduleRecognitionRestart(long delay){if(!running||!continuousListening()||restartScheduled)return;restartScheduled=true;handler.postDelayed(this::startRecognition,delay);}
-  void sayResponse(String text){if(!ttsReady||tts==null||text==null||text.trim().isEmpty()){armHandsFree();return;}pauseRecognition();if(snapDetector!=null)snapDetector.stop();String[] parts=text.trim().split("(?<=[.!?])\\s+");String last="axtor-last-"+System.nanoTime();for(int i=0;i<parts.length;i++){String sentence=parts[i].trim();if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,i==parts.length-1?last:"axtor-"+System.nanoTime());}}
-  public int onStartCommand(Intent i,int f,int s){
-    if(i!=null&&"STOP".equals(i.getAction())){getSharedPreferences("axtor",0).edit().putBoolean("voice_enabled",false).remove("owner_session_until").apply();getSharedPreferences(PREF,0).edit().putBoolean("continuous_listening",false).apply();stopSelf();return START_NOT_STICKY;}
-    if(i!=null&&OwnerBiometricActivity.ACTION_OWNER_BIOMETRIC_OK.equals(i.getAction())){String ch=i.getStringExtra(OwnerBiometricActivity.EXTRA_CHALLENGE);String sig=i.getStringExtra(OwnerBiometricActivity.EXTRA_SIGNATURE);if(verifyOwnerBiometric(ch,sig)){long until=System.currentTimeMillis()+OWNER_SESSION_TTL_MS;getSharedPreferences("axtor",0).edit().putString("owner_gate","authorized").putLong("owner_session_until",until).putString("voice_last_trigger","owner_session_authorized").remove("owner_challenge").remove("owner_challenge_time").apply();awaitingSnapCommand=false;armHandsFree();}else{getSharedPreferences("axtor",0).edit().putString("owner_gate","rejected").remove("owner_challenge").remove("owner_challenge_time").apply();rememberVoiceError("OWNER_BIOMETRIC_SIGNATURE_REJECTED");armHandsFree();}return START_STICKY;}
-    running=true;VoiceServiceState.setRunning(true);if(recognizer==null&&snapDetector==null&&!enrolling)armHandsFree();return START_STICKY;
+
+  void say(String s){
+    if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty()){pauseRecognition();tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor-"+System.nanoTime());}
+    else if(running&&continuousListening())scheduleRecognitionRestart(500);
   }
-  public void onDestroy(){running=false;if(snapDetector!=null){snapDetector.stop();snapDetector=null;}if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}}recognizer=null;ttsReady=false;handler.removeCallbacksAndMessages(null);if(tts!=null){tts.stop();tts.shutdown();}VoiceServiceState.setRunning(false);super.onDestroy();}
+
+  void sayResponse(String text){
+    if(!ttsReady||tts==null||text==null||text.trim().isEmpty()){scheduleRecognitionRestart(250);return;}
+    pauseRecognition();
+    String[] parts=text.trim().split("(?<=[.!?])\\s+");
+    String last="axtor-last-"+System.nanoTime();
+    for(int i=0;i<parts.length;i++){
+      String sentence=parts[i].trim(); if(!sentence.isEmpty()) tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,i==parts.length-1?last:"axtor-"+System.nanoTime());
+    }
+  }
+
+  public int onStartCommand(Intent i,int f,int s){
+    if(i!=null&&"STOP".equals(i.getAction())){
+      getSharedPreferences("axtor",0).edit().putBoolean("voice_enabled",false).apply();
+      getSharedPreferences(PREF,0).edit().putBoolean("continuous_listening",false).apply();
+      stopSelf(); return START_NOT_STICKY;
+    }
+    running=true; VoiceServiceState.setRunning(true); if(recognizer==null)startRecognition(); return START_STICKY;
+  }
+
+  public void onDestroy(){
+    running=false; if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}} recognizer=null;
+    ttsReady=false; handler.removeCallbacksAndMessages(null); if(tts!=null){tts.stop();tts.shutdown();}
+    VoiceServiceState.setRunning(false); super.onDestroy();
+  }
   public android.os.IBinder onBind(Intent i){return null;}
   public void onInit(int status){ttsReady=status==TextToSpeech.SUCCESS;if(!ttsReady)rememberVoiceError("TTS_UNAVAILABLE");}
-  public void onResults(Bundle r){consecutiveErrors=0;if(onlineFallback){onlineFallback=false;getSharedPreferences(PREF,0).edit().putBoolean("prefer_offline",true).apply();}ArrayList<String>x=r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);if(x!=null){for(String candidate:x){if(awaitingSnapCommand){command(candidate);return;}if(extractCommand(candidate)!=null){command(candidate);return;}}}armHandsFree();}
-  public void onError(int e){if(!running)return;consecutiveErrors++;rememberVoiceError("SPEECH_ERROR_"+e);if(!continuousListening()){stopSelf();return;}if(snapMode()){awaitingSnapCommand=false;armHandsFree();return;}if(getSharedPreferences(PREF,0).getBoolean("prefer_offline",true)&&!onlineFallback){onlineFallback=true;getSharedPreferences(PREF,0).edit().putBoolean("prefer_offline",false).apply();scheduleRecognitionRestart(300);return;}onlineFallback=false;getSharedPreferences(PREF,0).edit().putBoolean("prefer_offline",true).apply();scheduleRecognitionRestart(Math.min(5000L,800L+consecutiveErrors*300L));}
-  public void onReadyForSpeech(Bundle b){}public void onBeginningOfSpeech(){}public void onRmsChanged(float v){}public void onBufferReceived(byte[] b){}public void onEndOfSpeech(){}public void onPartialResults(Bundle b){}public void onEvent(int a,Bundle b){}
+  public void onResults(Bundle r){
+    consecutiveErrors=0;
+    ArrayList<String>x=r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+    if(x!=null){for(String candidate:x){if(candidate!=null&&!candidate.trim().isEmpty()){command(candidate);return;}}}
+    scheduleRecognitionRestart(250);
+  }
+  public void onError(int e){
+    if(!running)return; consecutiveErrors++; rememberVoiceError("SPEECH_ERROR_"+e);
+    if(!continuousListening()){stopSelf();return;}
+    scheduleRecognitionRestart(Math.min(5000L,500L+consecutiveErrors*300L));
+  }
+  public void onReadyForSpeech(Bundle b){} public void onBeginningOfSpeech(){} public void onRmsChanged(float v){} public void onBufferReceived(byte[] b){} public void onEndOfSpeech(){} public void onPartialResults(Bundle b){} public void onEvent(int a,Bundle b){}
 }
