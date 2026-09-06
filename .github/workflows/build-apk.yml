@@ -29,6 +29,20 @@ jobs:
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
           yes | sdkmanager --licenses || true
+      - name: Configure stable signing key when repository secrets are available
+        if: ${{ secrets.AXTOR_KEYSTORE_BASE64 != '' && secrets.AXTOR_KEYSTORE_PASSWORD != '' && secrets.AXTOR_KEY_ALIAS != '' && secrets.AXTOR_KEY_PASSWORD != '' }}
+        env:
+          AXTOR_KEYSTORE_BASE64: ${{ secrets.AXTOR_KEYSTORE_BASE64 }}
+          AXTOR_KEYSTORE_PASSWORD: ${{ secrets.AXTOR_KEYSTORE_PASSWORD }}
+          AXTOR_KEY_ALIAS: ${{ secrets.AXTOR_KEY_ALIAS }}
+          AXTOR_KEY_PASSWORD: ${{ secrets.AXTOR_KEY_PASSWORD }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/signing"
+          printf '%s' "$AXTOR_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/signing/axtor-release.jks"
+          echo "AXTOR_KEYSTORE_FILE=$GITHUB_WORKSPACE/signing/axtor-release.jks" >> "$GITHUB_ENV"
+          echo "AXTOR_KEYSTORE_PASSWORD=$AXTOR_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "AXTOR_KEY_ALIAS=$AXTOR_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "AXTOR_KEY_PASSWORD=$AXTOR_KEY_PASSWORD" >> "$GITHUB_ENV"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -49,8 +63,8 @@ jobs:
         run: ./gradlew clean
       - name: Run unit tests
         run: ./gradlew test --stacktrace
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --info
+      - name: Build updateable release APK
+        run: ./gradlew assembleRelease --stacktrace --info
       - name: Locate APK
         run: |
           echo "Generated APKs:"
@@ -58,7 +72,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Axtor-debug-apk
-          path: "**/build/outputs/apk/debug/*.apk"
+          name: Axtor-release-apk
+          path: "**/build/outputs/apk/release/*.apk"
           if-no-files-found: error
           retention-days: 30
