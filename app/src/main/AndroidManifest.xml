@@ -3,6 +3,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
@@ -27,6 +28,7 @@
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
         <activity android:name=".SoundTriggerActivity" android:exported="false"/>
+        <activity android:name=".OwnerBiometricActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="true"/>
         <service android:name=".VoiceAssistantService" android:exported="false" android:foregroundServiceType="microphone"/>
         <service android:name=".SoundTriggerService" android:exported="false" android:foregroundServiceType="microphone"/>
         <service android:name=".VoiceAssistantSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="false"/>
