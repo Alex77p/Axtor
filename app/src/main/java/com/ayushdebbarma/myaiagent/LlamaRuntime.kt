@@ -25,11 +25,18 @@ object LlamaRuntime {
     fun generate(context: Context, modelPath: String, prompt: String, systemPrompt: String, maxTokens: Int, callback: Callback) {
         CoroutineScope(Dispatchers.Default).launch {
             try {
+                val command = prompt.trim()
+                if (isExplicitDeviceCommand(command)) {
+                    AxtorAgent.handle(context, command, object : AxtorAgent.Callback {
+                        override fun onReply(text: String) = callback.onSuccess(text, 0.0)
+                        override fun onError(message: String) = callback.onError(message)
+                    })
+                    return@launch
+                }
                 val file = File(modelPath)
                 require(file.isFile) { "Model file does not exist: $modelPath" }
                 require(isGguf(file)) { "Selected model is not a valid GGUF file." }
                 require(file.length() > 4096) { "Selected GGUF model is empty or truncated." }
-                val app = context.applicationContext
                 modelLock.withLock {
                     val model = if (cachedModel?.isLoaded == true && cachedPath == file.absolutePath) cachedModel!! else {
                         cachedModel?.let { if (it.isLoaded) Llama.releaseModel(it) }
@@ -48,6 +55,15 @@ object LlamaRuntime {
                 } else callback.onError(t.message ?: t.javaClass.simpleName)
             }
         }
+    }
+
+    private fun isExplicitDeviceCommand(value: String): Boolean {
+        val l = value.lowercase().replace(Regex("\\s+"), " ").trim()
+        return l.matches(Regex("(go|show|open|lock|unlock|mute|unmute|increase|decrease|lower|raise|turn|start|stop|enable|disable|set) .+")) &&
+            (l.contains("home") || l.contains("back") || l.contains("recent") || l.contains("notification") ||
+             l.contains("settings") || l.contains("wifi") || l.contains("wi-fi") || l.contains("bluetooth") ||
+             l.contains("volume") || l.contains("screen") || l.contains("phone") || l.contains("device") ||
+             l.contains("sound trigger") || l.contains("alarm") || l.contains("accessibility") || l.contains("voice input"))
     }
 
     @JvmStatic fun releaseCachedModel() {
