@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 
-/** On-device personalized snap trigger with optional extended-range detection. */
+/** On-device personalized snap trigger with optional extended-range detection and safe direct command patterns. */
 public final class SnapTriggerEngine {
     public interface Listener { void onSnap(); void onDiagnostic(String message); }
     private static final String PREF="axtor_snap";
@@ -23,20 +23,21 @@ public final class SnapTriggerEngine {
     private final Context context; private volatile boolean running, emergencyOnly;
     private Thread thread; private final Listener listener; private long lastTrigger;
     private final Deque<Long> recentSnaps=new ArrayDeque<>();
+    private int patternCount;
     public SnapTriggerEngine(Context c, Listener l){context=c.getApplicationContext();listener=l;ExtendedRangeState.enabled=isExtendedRangeEnabled(context);}
     public boolean isEnrolled(){return isEnrolled(context);}
     public static boolean isEnrolled(Context c){return !c.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
-    public void setEmergencyOnly(boolean value){emergencyOnly=value;synchronized(recentSnaps){recentSnaps.clear();}}
+    public void setEmergencyOnly(boolean value){emergencyOnly=value;synchronized(recentSnaps){recentSnaps.clear();}patternCount=0;}
     public static boolean isExtendedRangeEnabled(Context c){return c.getSharedPreferences(PREF,0).getBoolean("extended_range",true);}
     public static void setExtendedRangeEnabled(Context c,boolean value){c.getSharedPreferences(PREF,0).edit().putBoolean("extended_range",value).apply();ExtendedRangeState.enabled=value;}
     public void start(){
-        if(running){emergencyOnly=false;synchronized(recentSnaps){recentSnaps.clear();}return;}
+        if(running){emergencyOnly=false;synchronized(recentSnaps){recentSnaps.clear();}patternCount=0;return;}
         if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=0){listener.onDiagnostic("SNAP_MIC_PERMISSION_MISSING");return;}
-        ExtendedRangeState.enabled=isExtendedRangeEnabled(context); running=true; emergencyOnly=false; thread=new Thread(this::loop,"AxtorSnapDetector"); thread.start();
+        ExtendedRangeState.enabled=isExtendedRangeEnabled(context); running=true; emergencyOnly=false; patternCount=0; thread=new Thread(this::loop,"AxtorSnapDetector"); thread.start();
     }
     public void stop(){
         if(emergencyOnly&&VoiceServiceState.isRunning()){synchronized(recentSnaps){recentSnaps.clear();}return;}
-        running=false;if(thread!=null){try{thread.interrupt();}catch(Exception ignored){}}thread=null;synchronized(recentSnaps){recentSnaps.clear();}
+        running=false;if(thread!=null){try{thread.interrupt();}catch(Exception ignored){}}thread=null;synchronized(recentSnaps){recentSnaps.clear();}patternCount=0;
     }
     private void loop(){
         int min=AudioRecord.getMinBufferSize(RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
@@ -49,13 +50,45 @@ public final class SnapTriggerEngine {
                 if(!VoiceServiceState.isRunning()){running=false;break;}
                 int n=r.read(buf,0,buf.length);if(n==buf.length){Features f=features(buf,n);if(isSnapLike(f)&&matchesTemplate(f)){
                     long now=System.currentTimeMillis();long cooldown=emergencyOnly?EMERGENCY_COOLDOWN_MS:NORMAL_COOLDOWN_MS;
-                    if(now-lastTrigger>cooldown){lastTrigger=now;if(recordEmergencySnap(now)){EmergencyStopController.request(context);return;}if(!emergencyOnly){emergencyOnly=true;listener.onSnap();}}
+                    if(now-lastTrigger>cooldown){lastTrigger=now;registerPattern(now);}
                 }}
             }
         }catch(Throwable t){listener.onDiagnostic("SNAP_DETECTOR_ERROR:"+t.getClass().getSimpleName());}
         finally{if(r!=null){try{r.stop();}catch(Exception ignored){}try{r.release();}catch(Exception ignored){}}}
     }
-    private boolean recordEmergencySnap(long now){synchronized(recentSnaps){while(!recentSnaps.isEmpty()&&now-recentSnaps.peekFirst()>EMERGENCY_WINDOW_MS)recentSnaps.removeFirst();recentSnaps.addLast(now);while(recentSnaps.size()>EMERGENCY_SNAP_COUNT)recentSnaps.removeFirst();return recentSnaps.size()>=EMERGENCY_SNAP_COUNT;}}
+    private void registerPattern(long now){
+        if(emergencyOnly){
+            if(recordEmergencySnap(now)){EmergencyStopController.request(context);return;}
+            return;
+        }
+        patternCount=Math.min(4,patternCount+1);
+        final int count=patternCount;
+        if(count==3){
+            // Preserve the emergency triple-snap safety action immediately.
+            patternCount=0; emergencyOnly=true; synchronized(recentSnaps){recentSnaps.clear();}
+            recentSnaps.addLast(now); listener.onDiagnostic("SNAP_PATTERN_TRIPLE_EMERGENCY_ARMED");
+            return;
+        }
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            if(!running||patternCount!=count)return;
+            patternCount=0;
+            if(count==1){listener.onSnap();}
+            else executeConfiguredPattern(count==2?"double":"quad");
+        },750);
+    }
+    private boolean recordEmergencySnap(long now){synchronized(recentSnaps){while(!recentSnaps.isEmpty()&&now-recentSnaps.peekFirst()>EMERGENCY_WINDOW_MS)recentSnaps.removeFirst();recentSnaps.addLast(now);return recentSnaps.size()>=EMERGENCY_SNAP_COUNT;}}
+    private void executeConfiguredPattern(String type){
+        SharedPreferences p=context.getSharedPreferences("axtor_sound",0);
+        String fallback=type.equals("double")?"volume down":"open notification settings";
+        String action=p.getString(type+"_action",fallback).trim();
+        if(action.isEmpty())return;
+        String policy=AxtorCommandSecurityPolicy.authorizeVoice(context,action);
+        if(!"OK".equals(policy)){listener.onDiagnostic("SNAP_COMMAND_BLOCKED:"+policy);return;}
+        String result=DeviceAutomation.execute(context,action);
+        p.edit().putString("last_trigger",type+":"+action).putString("last_result",result==null?"unsupported":result).apply();
+        if(result==null)listener.onDiagnostic("SNAP_COMMAND_UNSUPPORTED:"+type);
+        else listener.onDiagnostic("SNAP_COMMAND_EXECUTED:"+type+":"+action);
+    }
     public static boolean enroll(Context c){
         if(c.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=0)return false;int min=AudioRecord.getMinBufferSize(RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);if(min<=0)return false;
         AudioRecord r=null;try{r=new AudioRecord(MediaRecorder.AudioSource.MIC,RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,Math.max(min,FRAME*4));if(r.getState()!=AudioRecord.STATE_INITIALIZED)return false;r.startRecording();List<double[]> samples=new ArrayList<>();short[] b=new short[FRAME];long end=System.currentTimeMillis()+9000;
