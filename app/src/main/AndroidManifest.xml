@@ -17,6 +17,8 @@
     <application android:theme="@style/AppTheme" android:label="Axtor" android:icon="@drawable/ic_axtor" android:roundIcon="@drawable/ic_axtor" android:allowBackup="true" android:supportsRtl="true">
         <activity android:name=".ChatGPTActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
         <activity android:name=".MainActivity" android:exported="false"/>
+        <activity android:name=".OnlineAiSetupActivity" android:exported="false" android:excludeFromRecents="true"/>
+        <activity android:name=".FileAccessActivity" android:exported="false" android:excludeFromRecents="true"/>
         <activity android:name=".SoundTriggerActivity" android:exported="false"/><activity android:name=".OwnerBiometricActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="true"/>
         <service android:name=".VoiceAssistantService" android:exported="false" android:foregroundServiceType="microphone"/><service android:name=".SoundTriggerService" android:exported="false" android:foregroundServiceType="microphone"/>
         <service android:name=".VoiceAssistantSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="false"/>
