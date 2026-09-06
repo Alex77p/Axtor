@@ -2,165 +2,164 @@ package com.ayushdebbarma.myaiagent;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.widget.*;
+import java.io.InputStream;
+import java.util.Locale;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
-/**
- * Axtor's default ChatGPT-style interface. Voice remains the primary hands-free mode,
- * while this screen provides normal chat, status, and feature setup controls.
- */
+/** Lightweight ChatGPT-style launcher UI for Axtor. */
 public class ChatGPTActivity extends Activity {
     private static final int AUDIO = 42;
+    private static final int MODEL_PICKER = 77;
+    private static final String PREF = "axtor_chat";
+    private static final String HISTORY = "history";
     private LinearLayout messages;
     private ScrollView scroll;
     private TextView status;
-    private final Handler handler = new Handler(Looper.getMainLooper());
+    private EditText input;
+
+    private int dp(float v) { return (int)(v * getResources().getDisplayMetrics().density + .5f); }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         buildInterface();
+        restoreHistory();
         startWhenPermitted();
-        handler.post(statusUpdater);
     }
 
-    private int dp(float value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
+    private TextView label(String value, float size) {
+        TextView t = new TextView(this);
+        t.setText(value); t.setTextSize(size); t.setTextColor(Color.rgb(235,235,235));
+        t.setPadding(dp(4),dp(4),dp(4),dp(4));
+        return t;
+    }
 
-    private TextView text(String value, float size) {
-        TextView v = new TextView(this);
-        v.setText(value); v.setTextSize(size); v.setTextColor(Color.rgb(235,235,235));
-        v.setGravity(Gravity.CENTER_VERTICAL); v.setPadding(dp(4), dp(4), dp(4), dp(4));
-        return v;
+    private Button button(String value) {
+        Button b = new Button(this); b.setText(value); b.setAllCaps(false); return b;
     }
 
     private void buildInterface() {
         LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(32,33,35));
+        root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(Color.rgb(32,33,35));
 
         LinearLayout top = new LinearLayout(this);
-        top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(16), dp(10), dp(10), dp(10));
-        TextView title = text("Axtor", 21); title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        top.addView(title, new LinearLayout.LayoutParams(0, dp(52), 1));
-        Button menu = new Button(this); menu.setText("⋮"); menu.setTextSize(24); menu.setOnClickListener(v -> showFeatureMenu());
-        top.addView(menu, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(12),dp(6),dp(8),dp(4));
+        LinearLayout brand = new LinearLayout(this); brand.setOrientation(LinearLayout.VERTICAL);
+        TextView title = label("Axtor",21); title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        TextView sub = label("Personal Android AI assistant",12); sub.setTextColor(Color.LTGRAY);
+        brand.addView(title); brand.addView(sub);
+        top.addView(brand,new LinearLayout.LayoutParams(0,dp(54),1));
+        Button newChat=button("＋"); newChat.setContentDescription("New chat"); newChat.setOnClickListener(v->newChat());
+        top.addView(newChat,new LinearLayout.LayoutParams(dp(52),dp(52)));
+        Button menu=button("⋮"); menu.setTextSize(22); menu.setContentDescription("Axtor menu"); menu.setOnClickListener(v->showFeatureMenu());
+        top.addView(menu,new LinearLayout.LayoutParams(dp(52),dp(52)));
         root.addView(top);
 
-        status = text("● Starting Axtor…", 13); status.setTextColor(Color.LTGRAY); status.setPadding(dp(18), 0, dp(18), dp(8));
-        root.addView(status);
+        status=label("● Starting…",12); status.setTextColor(Color.LTGRAY); status.setPadding(dp(16),0,dp(16),dp(7)); root.addView(status);
 
-        scroll = new ScrollView(this); scroll.setFillViewport(true);
-        messages = new LinearLayout(this); messages.setOrientation(LinearLayout.VERTICAL); messages.setPadding(dp(12), dp(8), dp(12), dp(12));
-        scroll.addView(messages);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        addBubble("Hello! I'm Axtor. You can type a message or speak a command directly. No wake phrase is required.", false);
+        scroll=new ScrollView(this); scroll.setFillViewport(true);
+        messages=new LinearLayout(this); messages.setOrientation(LinearLayout.VERTICAL); messages.setPadding(dp(12),dp(8),dp(12),dp(12)); scroll.addView(messages);
+        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
 
-        LinearLayout composer = new LinearLayout(this);
-        composer.setGravity(Gravity.CENTER_VERTICAL); composer.setPadding(dp(10), dp(8), dp(10), dp(10));
-        EditText input = new EditText(this); input.setHint("Message Axtor…"); input.setTextColor(Color.WHITE); input.setHintTextColor(Color.GRAY);
-        input.setSingleLine(false); input.setMaxLines(4); input.setBackgroundColor(Color.rgb(48,49,52)); input.setPadding(dp(14), dp(8), dp(10), dp(8));
-        composer.addView(input, new LinearLayout.LayoutParams(0, dp(52), 1));
-        Button mic = new Button(this); mic.setText("🎙"); mic.setTextSize(20); mic.setContentDescription("Start voice assistant");
-        mic.setOnClickListener(v -> startWhenPermitted()); composer.addView(mic, new LinearLayout.LayoutParams(dp(58), dp(52)));
-        Button send = new Button(this); send.setText("➤"); send.setTextSize(20); send.setOnClickListener(v -> sendMessage(input));
-        composer.addView(send, new LinearLayout.LayoutParams(dp(58), dp(52)));
+        LinearLayout composer=new LinearLayout(this); composer.setGravity(Gravity.BOTTOM); composer.setPadding(dp(9),dp(7),dp(9),dp(9));
+        input=new EditText(this); input.setHint("Message Axtor…"); input.setTextColor(Color.WHITE); input.setHintTextColor(Color.GRAY); input.setMaxLines(5); input.setBackgroundColor(Color.rgb(48,49,52)); input.setPadding(dp(14),dp(7),dp(10),dp(7));
+        composer.addView(input,new LinearLayout.LayoutParams(0,dp(54),1));
+        Button mic=button("🎙"); mic.setTextSize(19); mic.setContentDescription("Start voice mode"); mic.setOnClickListener(v->startWhenPermitted()); composer.addView(mic,new LinearLayout.LayoutParams(dp(56),dp(54)));
+        Button send=button("➤"); send.setTextSize(19); send.setContentDescription("Send message"); send.setOnClickListener(v->sendMessage()); composer.addView(send,new LinearLayout.LayoutParams(dp(56),dp(54)));
         root.addView(composer);
         setContentView(root);
     }
 
-    private void addBubble(String value, boolean user) {
-        TextView bubble = text(value, 16);
-        bubble.setTextColor(Color.WHITE); bubble.setPadding(dp(16), dp(11), dp(16), dp(11));
-        bubble.setBackgroundColor(user ? Color.rgb(16,163,127) : Color.rgb(52,53,65));
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-2, -2);
-        p.setMargins(user ? dp(44) : dp(4), dp(6), user ? dp(4) : dp(44), dp(6));
-        p.gravity = user ? Gravity.END : Gravity.START; messages.addView(bubble, p);
-        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    private void addBubble(String value, boolean user, boolean save) {
+        if(value==null||value.trim().isEmpty())return;
+        TextView b=label(value,16); b.setTextColor(Color.WHITE); b.setPadding(dp(15),dp(11),dp(15),dp(11));
+        b.setBackgroundColor(user?Color.rgb(16,163,127):Color.rgb(52,53,65));
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,-2); p.setMargins(user?dp(44):dp(3),dp(6),user?dp(3):dp(44),dp(6)); p.gravity=user?Gravity.END:Gravity.START; messages.addView(b,p);
+        if(save)saveMessage(user,value); scroll.post(()->scroll.fullScroll(View.FOCUS_DOWN));
     }
 
-    private void sendMessage(EditText input) {
-        String command = input.getText().toString().trim(); if (command.isEmpty()) return;
-        addBubble(command, true); input.setText("");
-        String policy = AxtorCommandSecurityPolicy.authorizeVoice(this, command);
-        if (!"OK".equals(policy)) { addBubble("That command is blocked by Axtor security policy.", false); return; }
-        AxtorAgent.handle(this, command, new AxtorAgent.Callback() {
-            public void onReply(String response) { runOnUiThread(() -> addBubble(response == null ? "No response." : response, false)); }
-            public void onError(String message) { runOnUiThread(() -> addBubble("Command failed: " + (message == null ? "unknown error" : message), false)); }
+    private void sendMessage() {
+        String q=input.getText().toString().trim(); if(q.isEmpty())return;
+        addBubble(q,true,true); input.setText("");
+        String policy=AxtorCommandSecurityPolicy.authorizeVoice(this,q);
+        if(!"OK".equals(policy)){addBubble("I can't execute that request because it is blocked by Axtor's safety policy.",false,true);return;}
+        addBubble("Thinking…",false,false);
+        AxtorAgent.handle(this,q,new AxtorAgent.Callback(){
+            public void onReply(String r){runOnUiThread(()->replaceThinking(r==null?"No response.":r));}
+            public void onError(String e){runOnUiThread(()->replaceThinking("I couldn't complete that: "+(e==null?"unknown error":e)));}
         });
     }
 
-    private void startWhenPermitted() {
-        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, AUDIO); return;
-        }
-        startVoiceService();
+    private void replaceThinking(String value) {
+        if(messages.getChildCount()>0){View last=messages.getChildAt(messages.getChildCount()-1); if(last instanceof TextView && "Thinking…".contentEquals(((TextView)last).getText()))messages.removeView(last);}
+        addBubble(value,false,true);
     }
 
-    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == AUDIO && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) startVoiceService();
-        else if (requestCode == AUDIO) Toast.makeText(this, "Microphone permission is needed for voice mode.", Toast.LENGTH_SHORT).show();
+    private void saveMessage(boolean user,String text){
+        try{JSONArray a=new JSONArray(getSharedPreferences(PREF,0).getString(HISTORY,"[]")); JSONObject o=new JSONObject();o.put("user",user);o.put("text",text);a.put(o);while(a.length()>80)a.remove(0);getSharedPreferences(PREF,0).edit().putString(HISTORY,a.toString()).apply();}catch(Exception ignored){}
     }
 
-    private void startVoiceService() {
-        if (!VoiceServiceState.isRunning()) {
-            try { VoiceCommandManager.repair(this); }
-            catch (Exception e) { Toast.makeText(this, "Voice service could not start.", Toast.LENGTH_SHORT).show(); }
-        }
+    private void restoreHistory(){
+        try{JSONArray a=new JSONArray(getSharedPreferences(PREF,0).getString(HISTORY,"[]")); if(a.length()==0){addBubble("Hello! I'm Axtor. Type a request or speak directly—no wake phrase is required.",false,true);return;} for(int i=0;i<a.length();i++){JSONObject o=a.getJSONObject(i);addBubble(o.optString("text",""),o.optBoolean("user"),false);}}catch(Exception e){addBubble("Hello! I'm Axtor. You can type or speak a command directly.",false,true);}
     }
 
-    private void showFeatureMenu() {
-        final String[] items = {"Enable snap commands", "Disable snap commands", "Enroll personal snaps", "Toggle extended-range snap detection", "Run voice diagnostics", "Open setup guide"};
-        new android.app.AlertDialog.Builder(this).setTitle("Axtor features").setItems(items, (d, which) -> {
-            if (which == 0) {
-                if (!SnapTriggerEngine.isEnrolled(this)) { Toast.makeText(this, "Enroll your snaps first.", Toast.LENGTH_SHORT).show(); return; }
-                getSharedPreferences("axtor_voice",0).edit().putBoolean("snap_command_patterns_enabled",true).apply();
-                startVoiceService(); Toast.makeText(this,"Snap commands enabled.",Toast.LENGTH_SHORT).show();
-            } else if (which == 1) {
-                getSharedPreferences("axtor_voice",0).edit().putBoolean("snap_command_patterns_enabled",false).apply();
-                startVoiceService(); Toast.makeText(this,"Snap commands disabled.",Toast.LENGTH_SHORT).show();
-            } else if (which == 2) enrollSnaps();
-            else if (which == 3) {
-                boolean next=!SnapTriggerEngine.isExtendedRangeEnabled(this); SnapTriggerEngine.setExtendedRangeEnabled(this,next);
-                Toast.makeText(this,next?"Extended-range snaps ON":"Extended-range snaps OFF",Toast.LENGTH_SHORT).show();
-            } else if (which == 4) Toast.makeText(this, VoiceCommandManager.diagnose(this), Toast.LENGTH_LONG).show();
-            else showGuide();
-        }).show();
+    private void newChat(){messages.removeAllViews();getSharedPreferences(PREF,0).edit().putString(HISTORY,"[]").apply();addBubble("New chat started. How can I help?",false,true);}
+
+    private void startWhenPermitted(){
+        if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO);return;}
+        if(!VoiceServiceState.isRunning()){try{VoiceCommandManager.repair(this);}catch(Exception ignored){Toast.makeText(this,"Voice service could not start.",Toast.LENGTH_SHORT).show();}}
     }
 
-    private void enrollSnaps() {
-        Toast.makeText(this,"Make 3 clear snaps when prompted by the detector.",Toast.LENGTH_LONG).show();
-        new Thread(() -> {
-            boolean ok = SnapTriggerEngine.enroll(this);
-            runOnUiThread(() -> Toast.makeText(this, ok ? "Personal snap enrolled." : "Snap enrollment failed. Try again in a quiet room.", Toast.LENGTH_LONG).show());
-        }, "AxtorSnapEnrollment").start();
+    @Override public void onRequestPermissionsResult(int code,String[] p,int[] r){super.onRequestPermissionsResult(code,p,r);if(code==AUDIO){if(r.length>0&&r[0]==PackageManager.PERMISSION_GRANTED)startWhenPermitted();else Toast.makeText(this,"Microphone permission is needed for voice mode.",Toast.LENGTH_SHORT).show();}}
+
+    private void showFeatureMenu(){
+        String[] items={"AI & Models","Voice & Snaps","Device & Files","Diagnostics","Setup guide"};
+        new AlertDialog.Builder(this).setTitle("Axtor").setItems(items,(d,w)->{if(w==0)showAiMenu();else if(w==1)showVoiceMenu();else if(w==2)showDeviceMenu();else if(w==3)showDiagnostics();else showGuide();}).show();
     }
 
-    private void showGuide() {
-        new android.app.AlertDialog.Builder(this).setTitle("Axtor quick guide")
-            .setMessage("Voice: tap 🎙 and speak directly.\n\nSnaps: Features → Enroll personal snaps, then Enable snap commands. 1 snap = listen; 2 snaps = volume down; 3 snaps = emergency stop; 4 snaps = notification settings.\n\nAI: use the chat box for typed commands. Local GGUF is the offline path; configured online AI is the online path.\n\nFiles: grant Axtor a workspace/storage folder when the file-agent setup asks.\n\nSee docs/FEATURE_GUIDE.md in the repository for the complete setup and troubleshooting guide.")
-            .setPositiveButton("OK", null).show();
+    private void showAiMenu(){
+        String[] items={"Import GGUF model","Choose active model","Configure online AI","Model status"};
+        new AlertDialog.Builder(this).setTitle("AI & Models").setItems(items,(d,w)->{if(w==0)pickModel();else if(w==1)chooseModel();else if(w==2)startActivity(new Intent(this,OnlineAiSetupActivity.class));else modelStatus();}).show();
     }
 
-    private final Runnable statusUpdater = new Runnable() {
-        @Override public void run() {
-            if (status != null) status.setText(VoiceServiceState.isRunning() ? "● Voice assistant active  •  Hybrid AI" : "○ Voice assistant stopped  •  Tap 🎙 to start");
-            handler.postDelayed(this, 1500);
-        }
-    };
+    private void pickModel(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/octet-stream");startActivityForResult(i,MODEL_PICKER);}
 
-    @Override protected void onDestroy() { handler.removeCallbacks(statusUpdater); super.onDestroy(); }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){super.onActivityResult(requestCode,resultCode,data);if(requestCode!=MODEL_PICKER||resultCode!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();try{if(Build.VERSION.SDK_INT>=19)getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);InputStream in=getContentResolver().openInputStream(uri);String name=uri.getLastPathSegment();if(name==null||name.isEmpty())name="model.gguf";java.io.File f=LlamaRuntime.copyModel(this,in,name);AppCore.addLocalModel(this,f.getName(),f.getAbsolutePath());Toast.makeText(this,"GGUF imported and selected: "+f.getName(),Toast.LENGTH_LONG).show();updateStatus();}catch(Exception e){Toast.makeText(this,"Model import failed: "+e.getMessage(),Toast.LENGTH_LONG).show();}}
+
+    private void chooseModel(){try{JSONArray a=AppCore.models(this);if(a.length()==0){Toast.makeText(this,"No imported models yet.",Toast.LENGTH_SHORT).show();return;}String[] names=new String[a.length()];for(int i=0;i<a.length();i++)names[i]=a.getJSONObject(i).optString("name","Model "+(i+1));new AlertDialog.Builder(this).setTitle("Active GGUF model").setItems(names,(d,w)->{try{String p=a.getJSONObject(w).optString("path","");if(!p.isEmpty()){AppCore.setActiveModel(this,p);Toast.makeText(this,"Active model: "+names[w],Toast.LENGTH_SHORT).show();updateStatus();}}catch(Exception ignored){}}).show();}catch(Exception e){Toast.makeText(this,"Could not read model list.",Toast.LENGTH_SHORT).show();}}
+
+    private void modelStatus(){String p=AppCore.activeModel(this);String text=p.isEmpty()?"No local model selected.":"Local model: "+p+"\nReadiness: "+LlamaRuntime.modelReadiness(this,p)+"\nLoaded: "+LlamaRuntime.isModelLoaded()+"\nOnline AI: "+(OnlineAiRouter.configured(this)?"configured":"not configured");new AlertDialog.Builder(this).setTitle("Model status").setMessage(text).setPositiveButton("OK",null).show();}
+
+    private void showVoiceMenu(){
+        String[] items={"Start voice service","Stop voice service","Enroll personal snaps","Enable snap commands","Disable snap commands","Toggle extended-range snaps","Voice diagnostics"};
+        new AlertDialog.Builder(this).setTitle("Voice & Snaps").setItems(items,(d,w)->{switch(w){case 0:startWhenPermitted();break;case 1:stopService(new Intent(this,VoiceAssistantService.class));VoiceServiceState.setRunning(false);break;case 2:enrollSnaps();break;case 3:setSnap(true);break;case 4:setSnap(false);break;case 5:boolean n=!SnapTriggerEngine.isExtendedRangeEnabled(this);SnapTriggerEngine.setExtendedRangeEnabled(this,n);Toast.makeText(this,n?"Extended-range snaps ON":"Extended-range snaps OFF",Toast.LENGTH_SHORT).show();break;default:showDiagnostics();}}).show();
+    }
+
+    private void enrollSnaps(){Toast.makeText(this,"Make 3 clear snaps when prompted.",Toast.LENGTH_LONG).show();new Thread(()->{boolean ok=SnapTriggerEngine.enroll(this);runOnUiThread(()->Toast.makeText(this,ok?"Personal snap enrolled.":"Enrollment failed. Try again in a quiet room.",Toast.LENGTH_LONG).show());},"AxtorSnapEnrollment").start();}
+    private void setSnap(boolean enabled){if(enabled&&!SnapTriggerEngine.isEnrolled(this)){Toast.makeText(this,"Enroll your personal snaps first.",Toast.LENGTH_SHORT).show();return;}getSharedPreferences("axtor_voice",0).edit().putBoolean("snap_command_patterns_enabled",enabled).apply();if(enabled)startWhenPermitted();Toast.makeText(this,enabled?"Snap commands enabled.":"Snap commands disabled.",Toast.LENGTH_SHORT).show();}
+
+    private void showDeviceMenu(){
+        String[] items={"Grant file access","File access status","Open Android accessibility settings","Open app settings"};
+        new AlertDialog.Builder(this).setTitle("Device & Files").setItems(items,(d,w)->{if(w==0){startActivity(new Intent(this,FileAccessActivity.class));}else if(w==1){Toast.makeText(this,FileAgentTools.hasGrantedTree(this)?"Axtor file workspace is granted.":"No file workspace is granted.",Toast.LENGTH_LONG).show();}else if(w==2){startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}else{Intent i=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);i.setData(Uri.parse("package:"+getPackageName()));startActivity(i);}}).show();
+    }
+
+    private void showDiagnostics(){new AlertDialog.Builder(this).setTitle("Axtor diagnostics").setMessage(VoiceCommandManager.diagnose(this)+"\n\nLocal model: "+(AppCore.hasUsableActiveModel(this)?"ready":"not ready")+"\nOnline AI: "+(OnlineAiRouter.configured(this)?"configured":"not configured")+"\nSnaps: "+(SnapTriggerEngine.isEnrolled(this)?"enrolled":"not enrolled")+"\nAccessibility: "+AxtorAgent.accessibilityStatus(this)).setPositiveButton("OK",null).show();}
+
+    private void showGuide(){new AlertDialog.Builder(this).setTitle("Axtor quick guide").setMessage("CHAT — Type a request and press ➤. New chat clears local conversation history.\n\nVOICE — Tap 🎙 or Voice & Snaps → Start voice service. Speak the command directly; no wake phrase is required.\n\nSNAPS — Enroll 3 personal snaps, then enable snap commands. 1 snap = listen, 2 snaps = configured safe action, 3 snaps = emergency stop, 4 snaps = configured safe action.\n\nAI — AI & Models lets you import a GGUF model, select it, view readiness, or configure online AI.\n\nFILES — Device & Files → Grant file access gives the file agent a user-selected workspace.\n\nSAFETY — Axtor intentionally blocks root/shell/ADB, unlocking/bypass, destructive operations, credential access, and disabling Android protections.").setPositiveButton("OK",null).show();}
+
+    private void updateStatus(){if(status==null)return;String mode=AppCore.hasUsableActiveModel(this)?"Local model ready":(OnlineAiRouter.configured(this)?"Online AI configured":"No AI model configured");status.setText((VoiceServiceState.isRunning()?"● Voice active":"○ Voice stopped")+"  •  "+mode);}
+    @Override protected void onResume(){super.onResume();updateStatus();}
 }
