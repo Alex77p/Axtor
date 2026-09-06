@@ -8,6 +8,8 @@ import android.os.*;
 import android.speech.*;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import java.security.KeyStore;
+import java.security.Signature;
 import java.util.*;
 
 /** Foreground, restart-tolerant hands-free voice service. */
@@ -18,6 +20,8 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   final Handler handler=new Handler(Looper.getMainLooper());
   boolean restartScheduled=false,onlineFallback=false,usingOnDevice=false; int consecutiveErrors=0;
   SnapTriggerEngine snapDetector;
+  private static final String OWNER_ALIAS="axtor_owner_ec_v1";
+  private static final long OWNER_CHALLENGE_TTL_MS=30000L;
 
   @Override public void onCreate(){
     super.onCreate();running=true;VoiceServiceState.setRunning(true);
@@ -33,7 +37,8 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
   private boolean continuousListening(){return getSharedPreferences("axtor_voice",0).getBoolean("continuous_listening",true);}
   private boolean snapMode(){return getSharedPreferences("axtor_voice",0).getBoolean("snap_trigger_enabled",true);}
-  private String handsFreeModeText(){return snapMode()?"Hands-free: personalized snap trigger":"Hands-free: calling phrase";}
+  private boolean strictOwnerGate(){return getSharedPreferences("axtor_voice",0).getBoolean("strict_owner_biometric",true);}
+  private String handsFreeModeText(){return snapMode()?"Hands-free: personalized snap + owner biometric":"Hands-free: calling phrase";}
 
   private void beginEnrollment(){
     if(enrolling||!running)return;enrolling=true;pauseRecognition();
@@ -44,7 +49,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
       boolean ok=SnapTriggerEngine.enroll(this);
       handler.post(()->{
         enrolling=false;
-        if(ok){getSharedPreferences("axtor",0).edit().putString("voice_last_error","").apply();if(ttsReady)tts.speak("Snap pattern saved. I will ignore other sounds until your enrolled snap is detected.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-ok");armHandsFree();}
+        if(ok){getSharedPreferences("axtor",0).edit().putString("voice_last_error","").apply();if(ttsReady)tts.speak("Snap pattern saved. A copied or replayed snap will not be enough; Axtor will require your strong biometric before listening.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-ok");armHandsFree();}
         else{rememberVoiceError("SNAP_ENROLLMENT_FAILED");if(ttsReady)tts.speak("I could not learn three clear snaps. Please restart voice and try again in a quiet room.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-fail");armHandsFree();}
       });
     },"AxtorSnapEnrollment").start();
@@ -56,13 +61,42 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     if(snapMode()){
       pauseRecognition();
       if(snapDetector==null)snapDetector=new SnapTriggerEngine(this,new SnapTriggerEngine.Listener(){
-        public void onSnap(){if(!running)return;awaitingSnapCommand=true;getSharedPreferences("axtor",0).edit().putString("voice_last_trigger","personalized_snap").apply();if(snapDetector!=null)snapDetector.stop();handler.postDelayed(()->startRecognition(),120);}
+        public void onSnap(){
+          if(!running)return;
+          if(strictOwnerGate()){requestOwnerBiometric();}
+          else {awaitingSnapCommand=true;getSharedPreferences("axtor",0).edit().putString("voice_last_trigger","personalized_snap_unverified").apply();if(snapDetector!=null)snapDetector.stop();handler.postDelayed(()->startRecognition(),120);}
+        }
         public void onDiagnostic(String m){rememberVoiceError(m);}
       });
       if(!SnapTriggerEngine.isEnrolled(this)){rememberVoiceError("SNAP_NOT_ENROLLED");return;}
       snapDetector.start();
     }else startRecognition();
   }
+
+  private void requestOwnerBiometric(){
+    if(snapDetector!=null)snapDetector.stop();
+    awaitingSnapCommand=false;
+    byte[] challenge=new byte[32];new java.security.SecureRandom().nextBytes(challenge);
+    String encoded=Base64.getEncoder().encodeToString(challenge);
+    getSharedPreferences("axtor",0).edit().putString("owner_challenge",encoded).putLong("owner_challenge_time",System.currentTimeMillis()).putString("owner_gate","pending").putString("voice_last_trigger","personalized_snap_pending_biometric").apply();
+    try{
+      Intent i=new Intent(this,OwnerBiometricActivity.class);i.putExtra(OwnerBiometricActivity.EXTRA_CHALLENGE,encoded);i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+      startActivity(i);
+    }catch(Exception e){rememberVoiceError("OWNER_BIOMETRIC_LAUNCH_FAILED:"+e.getClass().getSimpleName());armHandsFree();}
+  }
+
+  private boolean verifyOwnerBiometric(String challengeB64,String signatureB64){
+    try{
+      SharedPreferences p=getSharedPreferences("axtor",0);String expected=p.getString("owner_challenge","");long when=p.getLong("owner_challenge_time",0);
+      if(expected.isEmpty()||!expected.equals(challengeB64)||System.currentTimeMillis()-when>OWNER_CHALLENGE_TTL_MS)return false;
+      byte[] challenge=Base64.getDecoder().decode(challengeB64);byte[] sig=Base64.getDecoder().decode(signatureB64);
+      KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);
+      java.security.cert.Certificate cert=ks.getCertificate(OWNER_ALIAS);if(cert==null)return false;
+      Signature verifier=Signature.getInstance("SHA256withECDSA");verifier.initVerify(cert.getPublicKey());verifier.update(challenge);
+      return verifier.verify(sig);
+    }catch(Exception e){rememberVoiceError("OWNER_BIOMETRIC_VERIFY_FAILED:"+e.getClass().getSimpleName());return false;}
+  }
+
   private void pauseRecognition(){restartScheduled=false;if(recognizer!=null){try{recognizer.cancel();}catch(Exception ignored){}}}
 
   void startRecognition(){
@@ -90,7 +124,18 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   void say(String s){if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty()){pauseRecognition();if(snapDetector!=null)snapDetector.stop();tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor-"+System.nanoTime());}else if(running&&continuousListening())scheduleRecognitionRestart(500);}
   void scheduleRecognitionRestart(long delay){if(!running||!continuousListening()||restartScheduled)return;restartScheduled=true;handler.postDelayed(this::startRecognition,delay);}
   void sayResponse(String text){if(!ttsReady||tts==null||text==null||text.trim().isEmpty()){armHandsFree();return;}pauseRecognition();if(snapDetector!=null)snapDetector.stop();String[] parts=text.trim().split("(?<=[.!?])\\s+");String last="axtor-last-"+System.nanoTime();for(int i=0;i<parts.length;i++){String sentence=parts[i].trim();if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,i==parts.length-1?last:"axtor-"+System.nanoTime());}}
-  public int onStartCommand(Intent i,int f,int s){if(i!=null&&"STOP".equals(i.getAction())){getSharedPreferences("axtor",0).edit().putBoolean("voice_enabled",false).apply();getSharedPreferences("axtor_voice",0).edit().putBoolean("continuous_listening",false).apply();stopSelf();return START_NOT_STICKY;}running=true;VoiceServiceState.setRunning(true);if(recognizer==null&&snapDetector==null&&!enrolling)armHandsFree();return START_STICKY;}
+  public int onStartCommand(Intent i,int f,int s){
+    if(i!=null&&"STOP".equals(i.getAction())){getSharedPreferences("axtor",0).edit().putBoolean("voice_enabled",false).apply();getSharedPreferences("axtor_voice",0).edit().putBoolean("continuous_listening",false).apply();stopSelf();return START_NOT_STICKY;}
+    if(i!=null&&OwnerBiometricActivity.ACTION_OWNER_BIOMETRIC_OK.equals(i.getAction())){
+      String ch=i.getStringExtra(OwnerBiometricActivity.EXTRA_CHALLENGE);String sig=i.getStringExtra(OwnerBiometricActivity.EXTRA_SIGNATURE);
+      if(verifyOwnerBiometric(ch,sig)){
+        getSharedPreferences("axtor",0).edit().putString("owner_gate","authorized").putString("voice_last_trigger","personalized_snap_biometric_verified").remove("owner_challenge").remove("owner_challenge_time").apply();
+        awaitingSnapCommand=true;handler.postDelayed(this::startRecognition,120);
+      }else{getSharedPreferences("axtor",0).edit().putString("owner_gate","rejected").remove("owner_challenge").remove("owner_challenge_time").apply();rememberVoiceError("OWNER_BIOMETRIC_SIGNATURE_REJECTED");armHandsFree();}
+      return START_STICKY;
+    }
+    running=true;VoiceServiceState.setRunning(true);if(recognizer==null&&snapDetector==null&&!enrolling)armHandsFree();return START_STICKY;
+  }
   public void onDestroy(){running=false;if(snapDetector!=null){snapDetector.stop();snapDetector=null;}if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}}recognizer=null;ttsReady=false;handler.removeCallbacksAndMessages(null);if(tts!=null){tts.stop();tts.shutdown();}VoiceServiceState.setRunning(false);super.onDestroy();}
   public android.os.IBinder onBind(Intent i){return null;}
   public void onInit(int status){ttsReady=status==TextToSpeech.SUCCESS;if(!ttsReady)rememberVoiceError("TTS_UNAVAILABLE");}
