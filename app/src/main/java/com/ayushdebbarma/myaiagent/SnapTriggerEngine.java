@@ -27,7 +27,8 @@ public final class SnapTriggerEngine {
     private static final String TEMPLATE="template";
     private static final int RATE=16000;
     private static final int FRAME=512;
-    private static final long COOLDOWN_MS=1400;
+    private static final long NORMAL_COOLDOWN_MS=1400;
+    private static final long EMERGENCY_COOLDOWN_MS=300;
     private static final long EMERGENCY_WINDOW_MS=2200;
     private static final int EMERGENCY_SNAP_COUNT=3;
     private final Context context;
@@ -41,18 +42,13 @@ public final class SnapTriggerEngine {
     public SnapTriggerEngine(Context c, Listener l){context=c.getApplicationContext();listener=l;}
     public boolean isEnrolled(){return !context.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
     public static boolean isEnrolled(Context c){return !c.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
-    /** Arm only the emergency watcher while a command is being executed. */
     public void setEmergencyOnly(boolean value){emergencyOnly=value;synchronized(recentSnaps){recentSnaps.clear();}}
     public void start(){
         if(running){emergencyOnly=false;synchronized(recentSnaps){recentSnaps.clear();}return;}
         if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=0){listener.onDiagnostic("SNAP_MIC_PERMISSION_MISSING");return;}
         running=true;emergencyOnly=false;thread=new Thread(this::loop,"AxtorSnapDetector");thread.start();
     }
-    /**
-     * A stop requested after a recognized snap leaves the microphone watcher in
-     * emergency-only mode. It self-terminates when the voice service actually
-     * dies, preventing a second independent long-lived microphone service.
-     */
+    /** Keep the emergency watcher armed after a command snap while the service is alive. */
     public void stop(){
         if(emergencyOnly && VoiceServiceState.isRunning()){
             synchronized(recentSnaps){recentSnaps.clear();}
@@ -75,7 +71,8 @@ public final class SnapTriggerEngine {
                     Features f=features(buf,n);
                     if(isSnapLike(f)&&matchesTemplate(f)){
                         long now=System.currentTimeMillis();
-                        if(now-lastTrigger>COOLDOWN_MS){
+                        long cooldown=emergencyOnly?EMERGENCY_COOLDOWN_MS:NORMAL_COOLDOWN_MS;
+                        if(now-lastTrigger>cooldown){
                             lastTrigger=now;
                             if(recordEmergencySnap(now)){EmergencyStopController.request(context);return;}
                             if(!emergencyOnly){emergencyOnly=true;listener.onSnap();}
