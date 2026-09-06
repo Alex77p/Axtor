@@ -8,6 +8,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.media.AudioManager;
+import android.os.PowerManager;
 import android.provider.Settings;
 
 import java.util.ArrayList;
@@ -21,12 +22,11 @@ public final class DeviceAutomation {
         String q = command == null ? "" : command.trim();
         String l = q.toLowerCase(Locale.ROOT);
         try {
-            // Canonical commands are accepted directly so model-generated actions cannot
-            // fall through to natural-language parsing and become no-ops.
             if (l.equals("set_alarm_1_minute")) l = "set alarm one minute";
             if (l.equals("sound_trigger_start")) l = "start sound triggers";
             if (l.equals("sound_trigger_stop")) l = "stop sound triggers";
             if (l.equals("open_sound_trigger_settings")) l = "open sound trigger settings";
+            if (l.equals("wake_screen") || l.equals("wake_screen_up")) l = "wake screen";
 
             android.content.SharedPreferences flowPrefs = context.getSharedPreferences("myaiagent", 0);
             String rawFlows = flowPrefs.getString("flows", "[]");
@@ -36,15 +36,10 @@ public final class DeviceAutomation {
                 if (rule == null) continue;
                 String trigger = rule.optString("trigger", "").trim().toLowerCase(Locale.ROOT);
                 String action = rule.optString("action", "").trim();
-                if (!trigger.isEmpty() && !action.isEmpty() &&
-                        (l.equals(trigger) || l.startsWith(trigger + " "))) {
-                    return execute(context, action);
-                }
+                if (!trigger.isEmpty() && !action.isEmpty() && (l.equals(trigger) || l.startsWith(trigger + " "))) return execute(context, action);
                 String normalizedTrigger = normalize(trigger);
                 String normalizedInput = normalize(l);
-                if (!normalizedTrigger.isEmpty() && (normalizedInput.equals(normalizedTrigger) || normalizedInput.startsWith(normalizedTrigger + " "))) {
-                    return execute(context, action);
-                }
+                if (!normalizedTrigger.isEmpty() && (normalizedInput.equals(normalizedTrigger) || normalizedInput.startsWith(normalizedTrigger + " "))) return execute(context, action);
             }
 
             if (l.startsWith("intent ")) {
@@ -64,7 +59,7 @@ public final class DeviceAutomation {
             if (l.startsWith("url ")) {
                 String uri = q.substring(4).trim();
                 if (!uri.matches("(?i)https?://\\S+")) return "Only http/https URLs are supported.";
-                Intent intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri));
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri));
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 context.startActivity(intent);
                 return "URL opened.";
@@ -75,97 +70,52 @@ public final class DeviceAutomation {
                 context.startActivity(i);
                 return "Hands-free sound trigger settings opened.";
             }
-            if (l.equals("start sound triggers") || l.equals("enable sound triggers") ||
-                    l.equals("sound trigger start") || l.equals("start sound trigger")) {
+            if (l.equals("start sound triggers") || l.equals("enable sound triggers") || l.equals("sound trigger start") || l.equals("start sound trigger")) {
                 context.getSharedPreferences("axtor_sound", 0).edit().putBoolean("enabled", true).apply();
-                if (android.os.Build.VERSION.SDK_INT >= 23 && context.checkSelfPermission("android.permission.RECORD_AUDIO") != PackageManager.PERMISSION_GRANTED) {
-                    return "Microphone permission is required. Open Axtor sound trigger settings and allow microphone access.";
-                }
+                if (android.os.Build.VERSION.SDK_INT >= 23 && context.checkSelfPermission("android.permission.RECORD_AUDIO") != PackageManager.PERMISSION_GRANTED) return "Microphone permission is required. Open Axtor sound trigger settings and allow microphone access.";
                 Intent i = new Intent(context, SoundTriggerService.class);
                 if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(i); else context.startService(i);
                 return "Sound triggers enabled.";
             }
-            if (l.equals("stop sound triggers") || l.equals("disable sound triggers") ||
-                    l.equals("sound trigger stop") || l.equals("stop sound trigger")) {
+            if (l.equals("stop sound triggers") || l.equals("disable sound triggers") || l.equals("sound trigger stop") || l.equals("stop sound trigger")) {
                 context.getSharedPreferences("axtor_sound", 0).edit().putBoolean("enabled", false).apply();
                 context.stopService(new Intent(context, SoundTriggerService.class));
                 return "Sound triggers disabled.";
             }
 
-            AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (l.equals("wake screen") || l.equals("turn screen on") || l.equals("wake up screen") || l.equals("turn on screen")) {
+                return wakeScreen(context) ? "Screen awakened." : "Android did not allow Axtor to wake the screen.";
+            }
 
+            AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
             if (l.contains("volume up") || l.contains("increase volume") || l.contains("turn up volume")) {
-                audio.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_PLAY_SOUND);
-                return "Volume increased.";
+                audio.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_PLAY_SOUND); return "Volume increased.";
             }
             if (l.contains("volume down") || l.contains("decrease volume") || l.contains("turn down volume")) {
-                audio.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_PLAY_SOUND);
-                return "Volume decreased.";
+                audio.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_PLAY_SOUND); return "Volume decreased.";
             }
-            if (l.equals("mute") || l.contains("mute volume")) {
-                audio.adjustVolume(AudioManager.ADJUST_MUTE, 0);
-                return "Volume muted.";
-            }
-            if (l.contains("unmute")) {
-                audio.adjustVolume(AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_PLAY_SOUND);
-                return "Volume unmuted.";
-            }
+            if (l.equals("mute") || l.contains("mute volume")) { audio.adjustVolume(AudioManager.ADJUST_MUTE, 0); return "Volume muted."; }
+            if (l.contains("unmute")) { audio.adjustVolume(AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_PLAY_SOUND); return "Volume unmuted."; }
 
-            if (l.equals("go home") || l.equals("home") || l.contains("go to home screen")) {
-                return AxtorAccessibilityService.home() ? "Home opened." : accessibilityRequired();
-            }
-            if (l.contains("go back") || l.equals("back")) {
-                return AxtorAccessibilityService.back() ? "Went back." : accessibilityRequired();
-            }
-            if (l.contains("open recent") || l.contains("show recent apps")) {
-                return AxtorAccessibilityService.recents() ? "Recent apps opened." : accessibilityRequired();
-            }
-            if (l.contains("open notifications") || l.contains("show notifications")) {
-                return AxtorAccessibilityService.notifications() ? "Notifications opened." : accessibilityRequired();
-            }
-            if (l.contains("lock screen") || l.contains("lock the screen") ||
-                    l.contains("lock my screen") || l.contains("lock my phone") ||
-                    l.contains("lock the phone") || l.equals("lock phone") ||
-                    l.equals("lock device") || l.contains("lock my device")) {
-                return AxtorAccessibilityService.lockScreen() ? "Screen locked." : accessibilityRequired();
-            }
+            if (l.equals("go home") || l.equals("home") || l.contains("go to home screen")) return AxtorAccessibilityService.home() ? "Home opened." : accessibilityRequired();
+            if (l.contains("go back") || l.equals("back")) return AxtorAccessibilityService.back() ? "Went back." : accessibilityRequired();
+            if (l.contains("open recent") || l.contains("show recent apps")) return AxtorAccessibilityService.recents() ? "Recent apps opened." : accessibilityRequired();
+            if (l.contains("open notifications") || l.contains("show notifications")) return AxtorAccessibilityService.notifications() ? "Notifications opened." : accessibilityRequired();
+            if (l.contains("lock screen") || l.contains("lock the screen") || l.contains("lock my screen") || l.contains("lock my phone") || l.contains("lock the phone") || l.equals("lock phone") || l.equals("lock device") || l.contains("lock my device")) return AxtorAccessibilityService.lockScreen() ? "Screen locked." : accessibilityRequired();
 
-            if (l.contains("open app settings") || l.contains("application settings")) {
-                context.startActivity(new Intent(Settings.ACTION_APPLICATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return "App settings opened.";
-            }
-            if (l.contains("open accessibility settings")) {
-                context.startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return "Accessibility settings opened.";
-            }
-            if (l.contains("open voice input settings") || l.contains("speech settings")) {
-                context.startActivity(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return "Voice input settings opened.";
-            }
+            if (l.contains("open app settings") || l.contains("application settings")) { context.startActivity(new Intent(Settings.ACTION_APPLICATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return "App settings opened."; }
+            if (l.contains("open accessibility settings")) { context.startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return "Accessibility settings opened."; }
+            if (l.contains("open voice input settings") || l.contains("speech settings")) { context.startActivity(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return "Voice input settings opened."; }
             if (l.contains("open notification settings") || l.contains("notification settings")) {
-                Intent notificationSettings = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(notificationSettings);
-                return "Notification settings opened.";
+                Intent notificationSettings = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(notificationSettings); return "Notification settings opened.";
             }
-
-            if (l.contains("open settings")) {
-                context.startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return "Settings opened.";
-            }
-            if (l.contains("open wifi") || l.contains("wi-fi settings")) {
-                context.startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return "Wi-Fi settings opened.";
-            }
-            if (l.contains("open bluetooth") || l.contains("bluetooth settings")) {
-                context.startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return "Bluetooth settings opened.";
-            }
+            if (l.contains("open settings")) { context.startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return "Settings opened."; }
+            if (l.contains("open wifi") || l.contains("wi-fi settings")) { context.startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return "Wi-Fi settings opened."; }
+            if (l.contains("open bluetooth") || l.contains("bluetooth settings")) { context.startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return "Bluetooth settings opened."; }
 
             if (l.startsWith("settings ")) {
-                String key=l.substring(9).trim().replace(' ', '_');
-                String action=null;
+                String key=l.substring(9).trim().replace(' ', '_'); String action=null;
                 if(key.equals("wifi")||key.equals("wifi_settings")) action=Settings.ACTION_WIFI_SETTINGS;
                 else if(key.equals("bluetooth")||key.equals("bluetooth_settings")) action=Settings.ACTION_BLUETOOTH_SETTINGS;
                 else if(key.equals("sound")||key.equals("sound_settings")) action=Settings.ACTION_SOUND_SETTINGS;
@@ -178,12 +128,7 @@ public final class DeviceAutomation {
                 else if(key.equals("date")||key.equals("date_settings")) action=Settings.ACTION_DATE_SETTINGS;
                 else if(key.equals("developer")||key.equals("developer_settings")) action=Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS;
                 else if(key.equals("security")||key.equals("security_settings")) action=Settings.ACTION_SECURITY_SETTINGS;
-                if(action!=null){
-                    Intent settingsIntent = new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    if (action.equals(Settings.ACTION_APP_NOTIFICATION_SETTINGS)) settingsIntent.putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName());
-                    context.startActivity(settingsIntent);
-                    return "Settings opened.";
-                }
+                if(action!=null){ Intent settingsIntent = new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); if (action.equals(Settings.ACTION_APP_NOTIFICATION_SETTINGS)) settingsIntent.putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName()); context.startActivity(settingsIntent); return "Settings opened."; }
                 return "That Android setting is not supported by this version of Axtor.";
             }
 
@@ -193,11 +138,7 @@ public final class DeviceAutomation {
                 if (packageName == null && name.matches("[A-Za-z0-9_]+\\.[A-Za-z0-9_.]+")) packageName = name;
                 if (packageName != null) {
                     Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
-                    if (launch != null) {
-                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        context.startActivity(launch);
-                        return "Opened " + name + ".";
-                    }
+                    if (launch != null) { launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(launch); return "Opened " + name + "."; }
                 }
                 return "I couldn't find an installed app named " + name + ".";
             }
@@ -208,80 +149,60 @@ public final class DeviceAutomation {
                 PendingIntent pi = PendingIntent.getBroadcast(context, 1001, alarm, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
                 if (am == null) return "Android alarm service is unavailable.";
-                if (android.os.Build.VERSION.SDK_INT >= 23 && am.canScheduleExactAlarms()) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
-                } else {
-                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
-                }
+                if (android.os.Build.VERSION.SDK_INT >= 23 && am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
+                else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
                 return "Alarm set for one minute from now.";
             }
-
             return null;
-        } catch (SecurityException e) {
-            return "Android blocked that action. Please grant the required permission in Settings.";
-        } catch (Exception e) {
-            return "Automation failed: " + e.getMessage();
-        }
+        } catch (SecurityException e) { return "Android blocked that action. Please grant the required permission in Settings."; }
+        catch (Exception e) { return "Automation failed: " + e.getMessage(); }
     }
 
-    private static String accessibilityRequired() {
-        return "Axtor Accessibility Service is not connected. Please enable it in Android Settings, then try again.";
+    private static boolean wakeScreen(Context context) {
+        PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        if (pm == null) return false;
+        if (pm.isInteractive()) return true;
+        PowerManager.WakeLock wl = null;
+        try {
+            wl = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "Axtor:WakeScreen");
+            wl.acquire(3000L);
+            return true;
+        } catch (Exception ignored) { return false; }
+        finally { if (wl != null && wl.isHeld()) wl.release(); }
     }
 
-    private static String normalize(String value) {
-        return value == null ? "" : value.toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9 ]", " ")
-                .replaceAll("\\s+", " ")
-                .trim();
-    }
-
-    private static boolean isAppLaunchCommand(String l) {
-        return l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ") ||
-                l.startsWith("run ") || l.startsWith("show ") || l.startsWith("go to ");
-    }
-
+    private static String accessibilityRequired() { return "Axtor Accessibility Service is not connected. Please enable it in Android Settings, then try again."; }
+    private static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim(); }
+    private static boolean isAppLaunchCommand(String l) { return l.startsWith("open ") || l.startsWith("launch ") || l.startsWith("start ") || l.startsWith("run ") || l.startsWith("show ") || l.startsWith("go to "); }
     private static String extractAppName(String q) {
-        String l = q.toLowerCase(Locale.ROOT).trim();
-        String name;
-        if (l.startsWith("open ")) name = q.substring(5).trim();
-        else if (l.startsWith("launch ")) name = q.substring(7).trim();
-        else if (l.startsWith("start ")) name = q.substring(6).trim();
-        else if (l.startsWith("run ")) name = q.substring(4).trim();
-        else if (l.startsWith("show ")) name = q.substring(5).trim();
-        else if (l.startsWith("go to ")) name = q.substring(6).trim();
-        else name = q.trim();
-        name = name.replaceFirst("(?i)^(the|my|please)\\s+", "");
-        name = name.replaceFirst("(?i)\\s+(app|application)$", "").trim();
-        return name;
+        String l = q.toLowerCase(Locale.ROOT).trim(); String name;
+        if (l.startsWith("open ")) name = q.substring(5).trim(); else if (l.startsWith("launch ")) name = q.substring(7).trim(); else if (l.startsWith("start ")) name = q.substring(6).trim(); else if (l.startsWith("run ")) name = q.substring(4).trim(); else if (l.startsWith("show ")) name = q.substring(5).trim(); else if (l.startsWith("go to ")) name = q.substring(6).trim(); else name = q.trim();
+        name = name.replaceFirst("(?i)^(the|my|please)\\s+", ""); name = name.replaceFirst("(?i)\\s+(app|application)$", "").trim(); return name;
     }
-
     private static String findPackage(Context c, String name) {
-        String wanted = normalize(name);
-        if (wanted.isEmpty()) return null;
-
-        PackageManager pm = c.getPackageManager();
-        Intent launcherQuery = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> launchers = pm.queryIntentActivities(launcherQuery, PackageManager.MATCH_DEFAULT_ONLY);
-        List<String> candidates = new ArrayList<>();
+        String wanted = normalize(name); if (wanted.isEmpty()) return null;
+        PackageManager pm = c.getPackageManager(); Intent launcherQuery = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> launchers = pm.queryIntentActivities(launcherQuery, PackageManager.MATCH_DEFAULT_ONLY); List<String> candidates = new ArrayList<>();
         for (ResolveInfo ri : launchers) {
-            if (ri.activityInfo == null) continue;
-            String packageName = ri.activityInfo.packageName;
-            CharSequence label = ri.loadLabel(pm);
-            if (label == null) continue;
+            if (ri.activityInfo == null) continue; String packageName = ri.activityInfo.packageName; CharSequence label = ri.loadLabel(pm); if (label == null) continue;
             String actual = normalize(label.toString());
             if (actual.equals(wanted)) return packageName;
             if (!actual.isEmpty() && (actual.contains(wanted) || wanted.contains(actual))) candidates.add(packageName);
         }
-
-        // Also check Axtor itself and any directly visible installed applications.
-        CharSequence ownLabel = pm.getApplicationLabel(c.getApplicationInfo());
-        if (ownLabel != null && normalize(ownLabel.toString()).equals(wanted)) return c.getPackageName();
+        CharSequence ownLabel = pm.getApplicationLabel(c.getApplicationInfo()); if (ownLabel != null && normalize(ownLabel.toString()).equals(wanted)) return c.getPackageName();
         for (android.content.pm.ApplicationInfo ai : pm.getInstalledApplications(PackageManager.GET_META_DATA)) {
-            CharSequence label = pm.getApplicationLabel(ai);
-            if (label != null && normalize(label.toString()).equals(wanted)) return ai.packageName;
+            CharSequence label = pm.getApplicationLabel(ai); if (label != null && normalize(label.toString()).equals(wanted)) return ai.packageName;
         }
-
-        if (candidates.size() == 1) return candidates.get(0);
+        // Common spoken names where the launcher label differs from the spoken name.
+        String aliasPackage = spokenAliasPackage(wanted);
+        if (aliasPackage != null && pm.getLaunchIntentForPackage(aliasPackage) != null) return aliasPackage;
+        if (candidates.size() == 1) return candidates.get(0); return null;
+    }
+    private static String spokenAliasPackage(String wanted) {
+        if (wanted.equals("chrome") || wanted.equals("google chrome")) return "com.android.chrome";
+        if (wanted.equals("youtube")) return "com.google.android.youtube";
+        if (wanted.equals("camera")) return "com.android.camera2";
+        if (wanted.equals("calculator") || wanted.equals("calc")) return "com.google.android.calculator";
         return null;
     }
 }
