@@ -5,6 +5,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.media.AudioManager;
 import android.provider.Settings;
@@ -20,6 +21,13 @@ public final class DeviceAutomation {
         String q = command == null ? "" : command.trim();
         String l = q.toLowerCase(Locale.ROOT);
         try {
+            // Canonical commands are accepted directly so model-generated actions cannot
+            // fall through to natural-language parsing and become no-ops.
+            if (l.equals("set_alarm_1_minute")) l = "set alarm one minute";
+            if (l.equals("sound_trigger_start")) l = "start sound triggers";
+            if (l.equals("sound_trigger_stop")) l = "stop sound triggers";
+            if (l.equals("open_sound_trigger_settings")) l = "open sound trigger settings";
+
             android.content.SharedPreferences flowPrefs = context.getSharedPreferences("myaiagent", 0);
             String rawFlows = flowPrefs.getString("flows", "[]");
             org.json.JSONArray saved = new org.json.JSONArray(rawFlows);
@@ -67,13 +75,18 @@ public final class DeviceAutomation {
                 context.startActivity(i);
                 return "Hands-free sound trigger settings opened.";
             }
-            if (l.equals("start sound triggers") || l.equals("enable sound triggers")) {
+            if (l.equals("start sound triggers") || l.equals("enable sound triggers") ||
+                    l.equals("sound trigger start") || l.equals("start sound trigger")) {
                 context.getSharedPreferences("axtor_sound", 0).edit().putBoolean("enabled", true).apply();
+                if (android.os.Build.VERSION.SDK_INT >= 23 && context.checkSelfPermission("android.permission.RECORD_AUDIO") != PackageManager.PERMISSION_GRANTED) {
+                    return "Microphone permission is required. Open Axtor sound trigger settings and allow microphone access.";
+                }
                 Intent i = new Intent(context, SoundTriggerService.class);
                 if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(i); else context.startService(i);
                 return "Sound triggers enabled.";
             }
-            if (l.equals("stop sound triggers") || l.equals("disable sound triggers")) {
+            if (l.equals("stop sound triggers") || l.equals("disable sound triggers") ||
+                    l.equals("sound trigger stop") || l.equals("stop sound trigger")) {
                 context.getSharedPreferences("axtor_sound", 0).edit().putBoolean("enabled", false).apply();
                 context.stopService(new Intent(context, SoundTriggerService.class));
                 return "Sound triggers disabled.";
@@ -194,7 +207,12 @@ public final class DeviceAutomation {
                 Intent alarm = new Intent(context, AlarmReceiver.class);
                 PendingIntent pi = PendingIntent.getBroadcast(context, 1001, alarm, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
+                if (am == null) return "Android alarm service is unavailable.";
+                if (android.os.Build.VERSION.SDK_INT >= 23 && am.canScheduleExactAlarms()) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
+                } else {
+                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
+                }
                 return "Alarm set for one minute from now.";
             }
 
@@ -241,13 +259,26 @@ public final class DeviceAutomation {
         String wanted = normalize(name);
         if (wanted.isEmpty()) return null;
 
+        PackageManager pm = c.getPackageManager();
+        Intent launcherQuery = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> launchers = pm.queryIntentActivities(launcherQuery, PackageManager.MATCH_DEFAULT_ONLY);
         List<String> candidates = new ArrayList<>();
-        for (android.content.pm.ApplicationInfo ai : c.getPackageManager().getInstalledApplications(PackageManager.GET_META_DATA)) {
-            CharSequence label = c.getPackageManager().getApplicationLabel(ai);
+        for (ResolveInfo ri : launchers) {
+            if (ri.activityInfo == null) continue;
+            String packageName = ri.activityInfo.packageName;
+            CharSequence label = ri.loadLabel(pm);
             if (label == null) continue;
             String actual = normalize(label.toString());
-            if (actual.equals(wanted)) return ai.packageName;
-            if (!actual.isEmpty() && (actual.contains(wanted) || wanted.contains(actual))) candidates.add(ai.packageName);
+            if (actual.equals(wanted)) return packageName;
+            if (!actual.isEmpty() && (actual.contains(wanted) || wanted.contains(actual))) candidates.add(packageName);
+        }
+
+        // Also check Axtor itself and any directly visible installed applications.
+        CharSequence ownLabel = pm.getApplicationLabel(c.getApplicationInfo());
+        if (ownLabel != null && normalize(ownLabel.toString()).equals(wanted)) return c.getPackageName();
+        for (android.content.pm.ApplicationInfo ai : pm.getInstalledApplications(PackageManager.GET_META_DATA)) {
+            CharSequence label = pm.getApplicationLabel(ai);
+            if (label != null && normalize(label.toString()).equals(wanted)) return ai.packageName;
         }
 
         if (candidates.size() == 1) return candidates.get(0);
