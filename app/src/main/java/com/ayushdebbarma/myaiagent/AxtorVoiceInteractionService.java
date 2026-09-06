@@ -8,7 +8,6 @@ import android.service.voice.VoiceInteractionService;
 public class AxtorVoiceInteractionService extends VoiceInteractionService {
     @Override public void onReady() {
         super.onReady();
-        try { setInvocationEffectEnabled(true); } catch (Throwable ignored) {}
     }
 
     @Override public void onLaunchVoiceAssistFromKeyguard() {
