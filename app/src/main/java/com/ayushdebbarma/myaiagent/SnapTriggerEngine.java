@@ -23,16 +23,16 @@ public final class SnapTriggerEngine {
     private final Context context; private volatile boolean running, emergencyOnly;
     private Thread thread; private final Listener listener; private long lastTrigger;
     private final Deque<Long> recentSnaps=new ArrayDeque<>();
-    public SnapTriggerEngine(Context c, Listener l){context=c.getApplicationContext();listener=l;}
+    public SnapTriggerEngine(Context c, Listener l){context=c.getApplicationContext();listener=l;ExtendedRangeState.enabled=isExtendedRangeEnabled(context);}
     public boolean isEnrolled(){return isEnrolled(context);}
     public static boolean isEnrolled(Context c){return !c.getSharedPreferences(PREF,0).getString(TEMPLATE,"").isEmpty();}
     public void setEmergencyOnly(boolean value){emergencyOnly=value;synchronized(recentSnaps){recentSnaps.clear();}}
     public static boolean isExtendedRangeEnabled(Context c){return c.getSharedPreferences(PREF,0).getBoolean("extended_range",true);}
-    public static void setExtendedRangeEnabled(Context c,boolean value){c.getSharedPreferences(PREF,0).edit().putBoolean("extended_range",value).apply();}
+    public static void setExtendedRangeEnabled(Context c,boolean value){c.getSharedPreferences(PREF,0).edit().putBoolean("extended_range",value).apply();ExtendedRangeState.enabled=value;}
     public void start(){
         if(running){emergencyOnly=false;synchronized(recentSnaps){recentSnaps.clear();}return;}
         if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=0){listener.onDiagnostic("SNAP_MIC_PERMISSION_MISSING");return;}
-        running=true; emergencyOnly=false; thread=new Thread(this::loop,"AxtorSnapDetector"); thread.start();
+        ExtendedRangeState.enabled=isExtendedRangeEnabled(context); running=true; emergencyOnly=false; thread=new Thread(this::loop,"AxtorSnapDetector"); thread.start();
     }
     public void stop(){
         if(emergencyOnly&&VoiceServiceState.isRunning()){synchronized(recentSnaps){recentSnaps.clear();}return;}
@@ -66,8 +66,7 @@ public final class SnapTriggerEngine {
     }
     public static void clearEnrollment(Context c){c.getSharedPreferences(PREF,0).edit().clear().apply();}
     private boolean matchesTemplate(Features f){SharedPreferences p=context.getSharedPreferences(PREF,0);String raw=p.getString(TEMPLATE,"");if(raw.isEmpty())return false;try{String[] a=raw.split(",");double[] t=new double[a.length];for(int i=0;i<a.length;i++)t[i]=Double.parseDouble(a[i]);return similarity(f.vector(),t)>=p.getFloat("threshold",0.86f);}catch(Exception e){return false;}}
-    private static boolean isSnapLike(Features f){boolean extended=isExtendedRangeEnabledGlobal();double peak=extended?0.12:0.30;double crest=extended?3.2:4.0;double hf=extended?0.18:0.30;double zcr=extended?0.025:0.04;return f.peak>peak&&f.crest>crest&&f.hf>hf&&f.durationMs<220&&f.zcr>zcr;}
-    private static boolean isExtendedRangeEnabledGlobal(){return ExtendedRangeState.enabled;}
+    private static boolean isSnapLike(Features f){boolean extended=ExtendedRangeState.enabled;double peak=extended?0.12:0.30;double crest=extended?3.2:4.0;double hf=extended?0.18:0.30;double zcr=extended?0.025:0.04;return f.peak>peak&&f.crest>crest&&f.hf>hf&&f.durationMs<220&&f.zcr>zcr;}
     private static double similarity(double[] a,double[] b){if(a.length!=b.length)return 0;double dot=0,aa=0,bb=0;for(int i=0;i<a.length;i++){dot+=a[i]*b[i];aa+=a[i]*a[i];bb+=b[i]*b[i];}if(aa==0||bb==0)return 0;return dot/(Math.sqrt(aa)*Math.sqrt(bb));}
     private static Features features(short[] x,int n){double sum=0,peak=0;int z=0;for(int i=0;i<n;i++){double v=Math.abs(x[i])/32768.0;sum+=v*v;if(v>peak)peak=v;if(i>0&&((x[i]>=0)!=(x[i-1]>=0)))z++;}double rms=Math.sqrt(sum/n);double hf=0,total=0;for(int k=1;k<n/2;k++){double re=0,im=0;double w=2*Math.PI*k/n;for(int i=0;i<n;i+=2){double a=x[i]/32768.0;re+=a*Math.cos(w*i);im-=a*Math.sin(w*i);}double mag=re*re+im*im;total+=mag;if(k>n/8)hf+=mag;}double crest=peak/Math.max(rms,0.0001);return new Features(peak,crest,hf/Math.max(total,0.0001),(z/(double)n),n*1000.0/RATE,rms);}
     private static final class Features{final double peak,crest,hf,zcr,durationMs,rms;Features(double p,double c,double h,double z,double d,double r){peak=p;crest=c;hf=h;zcr=z;durationMs=d;rms=r;}double[] vector(){return new double[]{peak,crest/10.0,hf,zcr*10.0,durationMs/100.0,rms*10.0};}}
