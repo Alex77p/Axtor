@@ -52,11 +52,4 @@ public class ChatGPTActivity extends Activity {
         }
         // Do NOT call finish(): the launcher is intentionally kept alive.
     }
-
-    @Override protected void onResume() {
-        super.onResume();
-        if (Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            startVoiceService();
-        }
-    }
 }
