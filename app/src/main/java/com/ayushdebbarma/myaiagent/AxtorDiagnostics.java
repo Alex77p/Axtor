@@ -28,12 +28,10 @@ public final class AxtorDiagnostics {
             out.put("onDeviceSpeechAvailable", android.os.Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(c));
             Intent ttsIntent = new Intent("android.intent.action.TTS_SERVICE");
             out.put("ttsEngineAvailable", !c.getPackageManager().queryIntentServices(ttsIntent, PackageManager.MATCH_ALL).isEmpty());
-            out.put("voiceInteractionSelected", VoiceInteractionService.isActiveService(c,
-                    new ComponentName(c, AxtorVoiceInteractionService.class)));
+            out.put("voiceInteractionSelected", VoiceInteractionService.isActiveService(c,new ComponentName(c, AxtorVoiceInteractionService.class)));
             out.put("webSearch", WebSearchProtocol.status(c));
             out.put("lastVoiceRoute", c.getSharedPreferences("axtor",0).getString("voice_last_route", ""));
             out.put("lastVoiceError", c.getSharedPreferences("axtor",0).getString("voice_last_error", ""));
-
             String model = AppCore.activeModel(c);
             out.put("activeModel", model == null ? "" : model);
             File modelFile = model == null || model.isEmpty() ? null : new File(model);
@@ -43,13 +41,15 @@ public final class AxtorDiagnostics {
             out.put("modelLoaded", LlamaRuntime.isModelLoaded());
             ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
             ActivityManager am = (ActivityManager)c.getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                am.getMemoryInfo(memory);
-                out.put("availableRamBytes", memory.availMem);
-                out.put("lowMemory", memory.lowMemory);
-            }
+            if (am != null) { am.getMemoryInfo(memory); out.put("availableRamBytes", memory.availMem); out.put("lowMemory", memory.lowMemory); }
             out.put("onlineEnabled", HybridAiRouter.onlineEnabled(c));
             out.put("onlineConfigured", HybridAiRouter.isConfigured(c));
+            out.put("snapEnrolled", SnapTriggerEngine.isEnrolled(c));
+            out.put("snapEnrollmentProgress", SnapTriggerEngine.enrollmentProgress(c));
+            out.put("snapEnrollmentDiagnostic", SnapTriggerEngine.enrollmentDiagnostic(c));
+            out.put("snapLiveStatus", SnapTriggerEngine.liveStatus(c));
+            out.put("snapDiagnostics", SnapTriggerEngine.captureDiagnostics(c));
+            out.put("snapDiagnosticsSummary", SnapTriggerEngine.diagnosticsSummary(c));
             out.put("mainCause", mainCause(out));
             out.put("status", status(out));
         } catch (Throwable t) {
@@ -70,6 +70,10 @@ public final class AxtorDiagnostics {
             b.append("TTS: ").append(o.optBoolean("ttsEngineAvailable") ? "available" : "unavailable").append('\n');
             b.append("Web search: ").append(o.optString("webSearch", "unknown")).append('\n');
             b.append("Accessibility: ").append(o.optBoolean("accessibility") ? "connected" : "not connected").append('\n');
+            b.append("Snap: ").append(o.optBoolean("snapEnrolled") ? "adaptive profile enrolled" : "not enrolled").append(" (progress ").append(o.optInt("snapEnrollmentProgress",0)).append("/3)\n");
+            b.append("Snap enrollment diagnostic: ").append(o.optString("snapEnrollmentDiagnostic", "unknown")).append('\n');
+            b.append("Snap detector: ").append(o.optString("snapLiveStatus", "unknown")).append('\n');
+            b.append("Snap metrics: ").append(o.optString("snapDiagnostics", "unknown")).append('\n');
             b.append("Model: ").append(o.optBoolean("modelGguf") ? "valid GGUF" : "missing/invalid").append('\n');
             b.append("Model loaded: ").append(o.optBoolean("modelLoaded")).append('\n');
             long bytes = o.optLong("modelBytes", 0);
