@@ -12,17 +12,25 @@ Axtor, Android AI assistant, AI assistant for Android, local AI, offline AI, GGU
 
 ## Releases
 
-### Axtor APK
+### Latest release
 
-[Download Axtor.apk](https://github.com/Alex77p/Axtor/releases/download/Release/Axtor.apk)
+Use the repository's Releases page for the newest tested distribution. Versioned `v*` tags trigger the Phase 13 release workflow, which builds both an APK and Android App Bundle (AAB). A release is published only when the tagged build completes successfully.
+
+### APK and AAB
+
+The APK is intended for direct Android installation. The AAB is the package format intended for store distribution.
 
 ### Default GGUF Llama model
 
-[Open the latest Axtor Release and download the default model](https://github.com/Alex77p/Axtor/releases/latest)
+Axtor supports importing a compatible GGUF model through its Models interface. A model is not bundled into the Android APK/AAB because GGUF model files can be large and device-specific; a compatible model can be distributed separately as a release asset when available.
 
-The latest release is the official distribution point for the Axtor APK and default GGUF model. GitHub supports direct latest-release asset URLs using the `/releases/latest/download/<asset-name>` format. The APK currently uses the stable asset name `Axtor.apk`.
+> Do not treat the existence of a release as proof that a model has been uploaded. Check the release Assets list for the exact model file.
 
-> If the default model is not visible in the release Assets list, it has not been uploaded to that release yet. A direct model-download URL can only be created after the model is attached as a release asset.
+## Validation
+
+Phases 1–11 have passed the repository CI baseline. Phase 12 contains the real-device validation matrix for cold start, low RAM, screen-off operation, Bluetooth/headphones, microphone, voice, snap detection, model inference, automation, emergency stop, and battery/network behavior.
+
+Real-device capabilities must be validated on an actual Android device; GitHub Actions alone cannot prove microphone, acoustic-distance, screen-off, or device-specific behavior.
 
 ## About the developer
 
@@ -37,4 +45,4 @@ This project may be relevant to people searching for **Axtor**, **Alex77p**, **A
 
 ## License
 
-See the repository's license files and release information for the applicable project terms.
+See `LICENSE.md` for the applicable project terms.
