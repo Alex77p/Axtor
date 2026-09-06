@@ -46,7 +46,6 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     pauseRecognition();
     snapEngine=new SnapTriggerEngine(this,new SnapTriggerEngine.Listener(){
       public void onSnap(){
-        // Single personalized snap is the hands-free listen trigger. Hand the microphone to SpeechRecognizer.
         stopSnapMode();
         snapListening=true;
         startRecognition(true);
@@ -112,7 +111,15 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   private void rememberVoiceError(String value){getSharedPreferences("axtor",0).edit().putString("voice_last_error",value).apply();}
-  private void pauseRecognition(){restartScheduled=false;if(recognizer!=null){try{recognizer.cancel();}catch(Exception ignored){}}}
+  /** Fully release SpeechRecognizer before SnapTriggerEngine opens AudioRecord. Android may otherwise keep the microphone capture session reserved. */
+  private void pauseRecognition(){
+    restartScheduled=false;
+    if(recognizer!=null){
+      try{recognizer.cancel();}catch(Exception ignored){}
+      try{recognizer.destroy();}catch(Exception ignored){}
+      recognizer=null;
+    }
+  }
   void scheduleRecognitionRestart(long delay){
     if(!running||!continuousListening()||restartScheduled||snapPatternMode())return;
     restartScheduled=true;handler.postDelayed(this::startRecognition,delay);
@@ -143,7 +150,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   }
 
   public void onDestroy(){
-    running=false; snapListening=false; stopSnapMode(); if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}} recognizer=null;
+    running=false; snapListening=false; stopSnapMode(); if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}}recognizer=null;
     ttsReady=false; handler.removeCallbacksAndMessages(null); if(tts!=null){tts.stop();tts.shutdown();}
     VoiceServiceState.setRunning(false); super.onDestroy();
   }
