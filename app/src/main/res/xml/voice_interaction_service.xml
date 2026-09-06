@@ -1,1 +1,4 @@
-<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android" android:sessionService="com.ayushdebbarma.myaiagent.VoiceAssistantSessionService" android:recognitionService="" />
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.ayushdebbarma.myaiagent.VoiceAssistantSessionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />
