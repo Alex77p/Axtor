@@ -6,11 +6,10 @@ import android.content.*;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.*;
-import android.provider.Settings;
 import android.view.Gravity;
 import android.widget.*;
 
-/** UI for configuring opt-in finger-snap sound triggers. */
+/** UI for configuring opt-in hands-free sound triggers. */
 public class SoundTriggerActivity extends Activity {
     private LinearLayout content;
     private final int bg = Color.rgb(255,245,240), brown = Color.rgb(45,24,16);
@@ -19,8 +18,7 @@ public class SoundTriggerActivity extends Activity {
     private Button btn(String s) { Button b = new Button(this); b.setText(s); b.setAllCaps(false); return b; }
 
     @Override public void onCreate(Bundle b) {
-        super.onCreate(b);
-        build();
+        super.onCreate(b); build();
         if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 10);
     }
 
@@ -32,37 +30,53 @@ public class SoundTriggerActivity extends Activity {
         setContentView(root); render();
     }
 
+    private EditText actionField(android.content.SharedPreferences p, String key, String title, String fallback) {
+        EditText e = new EditText(this); e.setSingleLine(true); e.setText(p.getString(key, fallback)); e.setHint("Custom Axtor action, e.g. open Chrome");
+        content.addView(tv(title,17)); content.addView(e); return e;
+    }
+
     private void render() {
         content.removeAllViews();
         android.content.SharedPreferences p = getSharedPreferences("axtor_sound",0);
         boolean enabled = p.getBoolean("enabled",false);
-        content.addView(tv("👆 Finger snap → Axtor action", 24));
-        content.addView(tv("Axtor listens for short snap-like sound transients. This is not speech recognition. It is OFF by default and uses the microphone only while you enable it.",14));
+        boolean wake = p.getBoolean("wake_on_screen_off",true);
+        content.addView(tv("👆 Hands-Free Snap Automation", 24));
+        content.addView(tv("Use one, two, three, or four rapid snaps. Each pattern can run a custom Axtor action. The listener is opt-in and remains visible as a foreground microphone service.",14));
 
         Switch sw = new Switch(this); sw.setText("Enable sound trigger monitoring"); sw.setTextSize(16); sw.setChecked(enabled);
-        sw.setOnCheckedChangeListener((button, on) -> { p.edit().putBoolean("enabled",on).apply(); if(on) startDetector(); else stopDetector(); render(); }); content.addView(sw);
+        sw.setOnCheckedChangeListener((button, on) -> { p.edit().putBoolean("enabled",on).apply(); if(on) startDetector(); else stopDetector(); }); content.addView(sw);
 
-        EditText single = new EditText(this); single.setSingleLine(true); single.setText(p.getString("single_action","lock screen")); single.setHint("Single snap action, e.g. lock screen"); content.addView(tv("Single snap",17)); content.addView(single);
-        EditText dbl = new EditText(this); dbl.setSingleLine(true); dbl.setText(p.getString("double_action","volume down")); dbl.setHint("Double snap action, e.g. volume down"); content.addView(tv("Double snap",17)); content.addView(dbl);
+        Switch wakeSw = new Switch(this); wakeSw.setText("Wake screen when a snap is detected while screen is off"); wakeSw.setTextSize(16); wakeSw.setChecked(wake);
+        wakeSw.setOnCheckedChangeListener((button,on) -> p.edit().putBoolean("wake_on_screen_off",on).apply()); content.addView(wakeSw);
+        content.addView(tv("Screen-off mode: Axtor can keep the foreground microphone service listening after the display turns off. Android/OEM battery restrictions may still stop background services.",13));
 
-        Button save = btn("✓ Save Trigger Actions"); save.setOnClickListener(v -> { String a=single.getText().toString().trim(), d=dbl.getText().toString().trim(); if(a.isEmpty()||d.isEmpty()){Toast.makeText(this,"Enter both actions.",Toast.LENGTH_SHORT).show();return;} p.edit().putString("single_action",a).putString("double_action",d).apply(); Toast.makeText(this,"Sound trigger actions saved.",Toast.LENGTH_SHORT).show(); }); content.addView(save);
+        EditText single = actionField(p,"single_action","1 snap — Custom action","wake screen");
+        EditText dbl = actionField(p,"double_action","2 snaps — Custom action","volume down");
+        EditText triple = actionField(p,"triple_action","3 snaps — Custom action","open settings");
+        EditText quad = actionField(p,"quad_action","4 snaps — Custom action","open notification settings");
 
-        Button test = btn("🧪 Test Single Snap Action Now"); test.setOnClickListener(v -> { String action=p.getString("single_action","lock screen"); String result=DeviceAutomation.execute(this,action); Toast.makeText(this,result==null?"Action not supported":result,Toast.LENGTH_LONG).show(); }); content.addView(test);
+        Button save = btn("✓ Save Custom Snap Actions");
+        save.setOnClickListener(v -> {
+            String a=single.getText().toString().trim(), d=dbl.getText().toString().trim(), t=triple.getText().toString().trim(), q=quad.getText().toString().trim();
+            if(a.isEmpty()||d.isEmpty()||t.isEmpty()||q.isEmpty()){Toast.makeText(this,"Enter an action for all four snap patterns.",Toast.LENGTH_SHORT).show();return;}
+            p.edit().putString("single_action",a).putString("double_action",d).putString("triple_action",t).putString("quad_action",q).apply();
+            Toast.makeText(this,"Custom snap actions saved.",Toast.LENGTH_SHORT).show();
+        }); content.addView(save);
+
+        Button test = btn("🧪 Test 1-Snap Custom Action Now");
+        test.setOnClickListener(v -> { String action=p.getString("single_action","wake screen"); String result=DeviceAutomation.execute(this,action); Toast.makeText(this,result==null?"Action not supported":result,Toast.LENGTH_LONG).show(); }); content.addView(test);
         Button stop = btn("⏹ Stop Sound Trigger Monitoring"); stop.setOnClickListener(v -> { p.edit().putBoolean("enabled",false).apply(); stopDetector(); render(); }); content.addView(stop);
-        content.addView(tv("Examples: single snap → lock screen; double snap → volume down. You can use supported Axtor actions such as open an app, volume controls, settings, URLs, or Accessibility actions. Android permissions still apply.",13));
-        content.addView(tv("Privacy: a persistent microphone listener can affect battery life and privacy. Axtor shows an ongoing foreground-service notification while monitoring and does not run this listener silently.",13));
+        content.addView(tv("Supported examples: wake screen, lock screen, go home, go back, volume up/down, mute/unmute, open settings, open an installed app, open Wi-Fi/Bluetooth settings, and other Axtor-supported actions. You can also use saved custom flows. Android permissions still apply.",13));
+        content.addView(tv("Privacy: the listener uses the microphone only while enabled and shows an ongoing foreground-service notification. Axtor does not silently hide the microphone listener.",13));
         Button back=btn("← Back to Axtor"); back.setOnClickListener(v->finish()); content.addView(back);
     }
 
     private void startDetector() {
         if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},10); return; }
-        // Do not keep two microphone services active at once.
         stopService(new Intent(this, VoiceAssistantService.class));
         Intent i=new Intent(this,SoundTriggerService.class);
         try { if(Build.VERSION.SDK_INT>=26) startForegroundService(i); else startService(i); } catch(Exception e) { Toast.makeText(this,"Could not start sound triggers: "+e.getMessage(),Toast.LENGTH_LONG).show(); }
     }
-
     private void stopDetector() { stopService(new Intent(this,SoundTriggerService.class)); }
-
     @Override protected void onResume(){super.onResume(); if(content!=null) render();}
 }
