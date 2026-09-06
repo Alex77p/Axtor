@@ -2,6 +2,8 @@ package com.ayushdebbarma.myaiagent;
 
 import android.content.Context;
 import java.util.Locale;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** Lowest-level policy for commands arriving from hands-free voice. */
 public final class AxtorCommandSecurityPolicy {
@@ -11,6 +13,7 @@ public final class AxtorCommandSecurityPolicy {
         String q = command == null ? "" : command.trim();
         String l = q.toLowerCase(Locale.ROOT);
         if (q.isEmpty()) return "EMPTY_COMMAND";
+        if (matchesSavedFlow(context, l)) return "CUSTOM_FLOW_REQUIRES_EXPLICIT_UI";
         if (l.matches(".*\\b(intent|shell|adb|am|pm|su|terminal|exec|command line)\\b.*") || l.startsWith("url ") || l.matches(".*https?://.*")) return "ARBITRARY_EXECUTION_BLOCKED";
         if (l.matches(".*\\b(unlock|bypass.*lock|disable.*security|turn off.*security|remove.*protection)\\b.*")) return "SECURITY_BYPASS_BLOCKED";
         if (l.matches(".*\\b(install|uninstall|factory reset|wipe data|erase device|delete all data)\\b.*")) return "DESTRUCTIVE_ACTION_REQUIRES_UI";
@@ -36,14 +39,24 @@ public final class AxtorCommandSecurityPolicy {
                 || l.matches(".*\\b(install|uninstall|factory reset|wipe|erase|unlock|bypass)\\b.*");
     }
 
+    private static boolean matchesSavedFlow(Context context, String input) {
+        try {
+            JSONArray saved = new JSONArray(context.getSharedPreferences("myaiagent", 0).getString("flows", "[]"));
+            String normalized = normalize(input);
+            for (int i = 0; i < saved.length(); i++) {
+                JSONObject rule = saved.optJSONObject(i); if (rule == null) continue;
+                String trigger = normalize(rule.optString("trigger", ""));
+                if (!trigger.isEmpty() && (normalized.equals(trigger) || normalized.startsWith(trigger + " "))) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim(); }
     private static boolean isSafeSettings(String l) {
-        return l.equals("settings wifi") || l.equals("settings wifi_settings")
-                || l.equals("settings bluetooth") || l.equals("settings bluetooth_settings")
-                || l.equals("settings sound") || l.equals("settings sound_settings")
-                || l.equals("settings display") || l.equals("settings display_settings")
-                || l.equals("settings battery") || l.equals("settings battery_settings")
-                || l.equals("settings app") || l.equals("settings app_settings")
-                || l.equals("settings language") || l.equals("settings language_settings")
-                || l.equals("settings date") || l.equals("settings date_settings");
+        return l.equals("settings wifi") || l.equals("settings wifi_settings") || l.equals("settings bluetooth") || l.equals("settings bluetooth_settings")
+                || l.equals("settings sound") || l.equals("settings sound_settings") || l.equals("settings display") || l.equals("settings display_settings")
+                || l.equals("settings battery") || l.equals("settings battery_settings") || l.equals("settings app") || l.equals("settings app_settings")
+                || l.equals("settings language") || l.equals("settings language_settings") || l.equals("settings date") || l.equals("settings date_settings");
     }
 }
