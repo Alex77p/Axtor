@@ -9,7 +9,7 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.*;
 
-/** Lightweight opt-in detector for short snap/clap-like audio transients. */
+/** Legacy configurable transient detector. Strict personalized snap mode owns the microphone when enabled. */
 public class SoundTriggerService extends Service {
     private static final int NOTIFICATION_ID = 72;
     private static final int SAMPLE_RATE = 16000;
@@ -22,7 +22,13 @@ public class SoundTriggerService extends Service {
     private double noiseFloor = 700.0;
 
     @Override public void onCreate() {
-        super.onCreate(); running = true;
+        super.onCreate();
+        if (getSharedPreferences("axtor_voice", 0).getBoolean("snap_trigger_enabled", true)) {
+            getSharedPreferences("axtor_sound", 0).edit().putBoolean("enabled", false).apply();
+            stopSelf();
+            return;
+        }
+        running = true;
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             nm.createNotificationChannel(new NotificationChannel("sound_triggers", "Axtor Sound Triggers", NotificationManager.IMPORTANCE_LOW));
@@ -55,10 +61,7 @@ public class SoundTriggerService extends Service {
             try { n = recorder.read(samples, 0, samples.length); } catch (Exception e) { break; }
             if (n <= 0) continue;
             double sum = 0.0; int peak = 0; int zeroCrossings = 0; short previous = samples[0];
-            for (int i = 0; i < n; i++) {
-                int v = Math.abs((int) samples[i]); sum += (double) samples[i] * samples[i]; if (v > peak) peak = v;
-                if ((previous < 0 && samples[i] >= 0) || (previous >= 0 && samples[i] < 0)) zeroCrossings++; previous = samples[i];
-            }
+            for (int i = 0; i < n; i++) { int v = Math.abs((int) samples[i]); sum += (double) samples[i] * samples[i]; if (v > peak) peak = v; if ((previous < 0 && samples[i] >= 0) || (previous >= 0 && samples[i] < 0)) zeroCrossings++; previous = samples[i]; }
             double rms = Math.sqrt(sum / n); double zcr = (double) zeroCrossings / Math.max(1, n);
             if (rms < noiseFloor * 1.6) noiseFloor = noiseFloor * 0.98 + rms * 0.02;
             double threshold = Math.max(1400.0, noiseFloor * 3.2);
@@ -70,11 +73,7 @@ public class SoundTriggerService extends Service {
         long now = System.currentTimeMillis();
         if (now - lastSnapAt < 180 || now - lastActionAt < 500) return;
         lastSnapAt = now; snapCount = Math.min(4, snapCount + 1); final int count = snapCount;
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (snapCount != count) return;
-            snapCount = 0;
-            executeConfiguredAction(count >= 4 ? "quad" : count == 3 ? "triple" : count == 2 ? "double" : "single");
-        }, 750);
+        new Handler(Looper.getMainLooper()).postDelayed(() -> { if (snapCount != count) return; snapCount = 0; executeConfiguredAction(count >= 4 ? "quad" : count == 3 ? "triple" : count == 2 ? "double" : "single"); }, 750);
     }
 
     private void executeConfiguredAction(String type) {
@@ -88,26 +87,16 @@ public class SoundTriggerService extends Service {
         else fallback = "open notification settings";
         String action = p.getString(type + "_action", fallback).trim();
         if (action.isEmpty()) return;
-
-        // Optional screen-off wake happens before the configured custom action.
-        if (p.getBoolean("wake_on_screen_off", true)) {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            if (pm != null && !pm.isInteractive()) DeviceAutomation.execute(this, "wake screen");
-        }
+        if (p.getBoolean("wake_on_screen_off", true)) { PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE); if (pm != null && !pm.isInteractive()) DeviceAutomation.execute(this, "wake screen"); }
         String result = DeviceAutomation.execute(this, action);
         p.edit().putString("last_trigger", type + ":" + action).putString("last_result", result == null ? "unsupported" : result).apply();
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        if (getSharedPreferences("axtor_voice", 0).getBoolean("snap_trigger_enabled", true)) { stopSelf(); return START_NOT_STICKY; }
         if (intent != null && "STOP".equals(intent.getAction())) { stopSelf(); return START_NOT_STICKY; }
         return START_NOT_STICKY;
     }
-
-    @Override public void onDestroy() {
-        running = false;
-        if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} recorder.release(); recorder = null; }
-        if (worker != null) { worker.interrupt(); worker = null; }
-        super.onDestroy();
-    }
+    @Override public void onDestroy() { running = false; if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} recorder.release(); recorder = null; } if (worker != null) { worker.interrupt(); worker = null; } super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return null; }
 }
