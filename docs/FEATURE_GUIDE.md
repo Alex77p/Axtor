@@ -1,125 +1,135 @@
 # Axtor Feature & Setup Guide
 
-This guide describes the features currently available in Axtor and how to enable them from the Android app.
+This guide describes the current Axtor Android interface and the main features available from it.
 
 ## 1. First launch
 
-1. Install the latest Axtor APK.
+1. Install the latest tested Axtor APK.
 2. Open Axtor.
 3. Grant **Microphone** permission when Android asks.
-4. Axtor opens on its default ChatGPT-style chat screen.
-5. Tap **🎙** to start voice mode if it is not already active.
+4. Axtor opens directly on its ChatGPT-style chat interface.
+5. Tap **🎙** if you want to start/restart voice mode.
 
 Axtor does not require a wake/calling phrase. Speak the command itself.
 
-## 2. Chat / AI
+## 2. Chat
 
 The main screen is the default ChatGPT-style interface.
 
-- Type a request in the message box and tap **➤**.
-- Tap **🎙** for hands-free voice operation.
-- Axtor routes approved commands through its agent/security layer.
-- Local GGUF inference is the offline AI path when a compatible model is installed.
-- The configured online AI router is the online path when network/API configuration is available.
+- Type a request and tap **➤**.
+- Tap **＋** to start a new local conversation.
+- Conversation history is stored locally and limited to the most recent messages.
+- Tap **⋮** for AI, voice, device/file, diagnostics, and guide controls.
 
-Do not assume that an online provider is unlimited or permanently free; provider quotas and terms can change.
+Approved commands are routed through Axtor's agent and security layer.
 
-## 3. Enable direct voice commands
+## 3. AI & Models
 
-Voice mode is enabled by tapping **🎙**. Axtor listens for the command directly; there is no "Hey Axtor" or other calling phrase.
+Open **⋮ → AI & Models**.
 
-If Android shows a microphone permission error:
+### Import GGUF
+
+Choose **Import GGUF model**, select a GGUF file, and Axtor copies it into its private model directory after validating the GGUF header and file size. The imported model becomes the active local model.
+
+### Choose active model
+
+Use **Choose active model** to switch between imported local GGUF models.
+
+### Model status
+
+**Model status** reports local-model readiness, whether the model is loaded, and whether online AI is configured.
+
+For low-memory phones, prefer a small quantized GGUF model and moderate context sizes.
+
+## 4. Online AI
+
+Open **⋮ → AI & Models → Configure online AI**.
+
+The user supplies their own provider API key. Axtor stores the key using Android Keystore encryption. Online AI is optional and provider quotas/terms apply; it is not guaranteed to be unlimited or permanently free.
+
+## 5. Direct voice commands
+
+Tap **🎙**, or open **⋮ → Voice & Snaps → Start voice service**.
+
+Speak the command directly. There is no "Hey Axtor" or other calling phrase.
+
+If Android shows a microphone error:
 
 **Android Settings → Apps → Axtor → Permissions → Microphone → Allow**
 
 Then reopen Axtor and tap **🎙**.
 
-## 4. Personal snap control
+## 6. Personal snap control
 
-Open the **⋮** menu and choose **Enroll personal snaps**.
+Open **⋮ → Voice & Snaps → Enroll personal snaps**.
 
-Axtor records three clear snap samples. Perform them in a reasonably quiet room and keep the microphone unobstructed.
+Axtor records three clear snap samples. Perform them in a reasonably quiet room with the microphone unobstructed.
 
-After enrollment:
-
-1. Open **⋮**.
-2. Choose **Enable snap commands**.
-3. Leave Axtor's voice service running.
-
-Current patterns:
+Then use **Enable snap commands**.
 
 | Pattern | Action |
 |---|---|
-| 1 snap | Hand microphone to voice recognition, then speak a command |
-| 2 snaps | Execute the configured double-snap safe command (default: volume down) |
+| 1 snap | Hand the microphone to voice recognition, then speak a command |
+| 2 snaps | Execute the configured safe double-snap command (default: volume down) |
 | 3 snaps | Emergency-stop safety action |
-| 4 snaps | Execute the configured quad-snap safe command (default: open notification settings) |
+| 4 snaps | Execute the configured safe quad-snap command (default: open notification settings) |
 
-Use **Toggle extended-range snap detection** when detection needs to work from a greater distance or with weaker snaps. It can increase sensitivity, so false triggers are possible in noisy environments.
+**Toggle extended-range snaps** can improve detection from farther away, but higher sensitivity can also increase false triggers in noisy environments.
 
-To turn the pattern mode off, open **⋮ → Disable snap commands**.
+Use **Disable snap commands** to turn pattern mode off.
 
-## 5. Device automation
+## 7. Device & Files
 
-Voice or typed commands can request supported device actions. Axtor checks every command against its security policy before execution.
+Open **⋮ → Device & Files**.
 
-Examples depend on the installed build and Android permissions. Dangerous operations are intentionally blocked, including arbitrary shell/root/ADB commands, unlocking/bypass actions, factory reset/wipe, credential access, and disabling security protections.
+- **Grant file access** opens the controlled workspace picker.
+- **File access status** reports whether a workspace has been granted.
+- **Open Android accessibility settings** takes you to Android's own accessibility settings.
+- **Open app settings** opens Axtor's Android app settings.
 
-## 6. File agent
+The file agent supports controlled operations such as listing, searching, reading, writing, appending, renaming, and creating directories within the user-granted workspace.
 
-The file agent supports controlled operations such as listing, searching, reading, writing, appending, renaming, creating directories, and deleting files.
+## 8. Diagnostics
 
-When the app provides file/workspace setup, grant access only to a directory you want Axtor to manage. Axtor is not intended to have unrestricted filesystem or root access.
+Open **⋮ → Diagnostics** to check:
 
-## 7. Local GGUF model
+- microphone permission;
+- speech-recognition availability;
+- voice-service state;
+- local GGUF readiness;
+- online AI configuration;
+- snap enrollment;
+- accessibility-service status.
 
-A compatible GGUF model can be imported through the model-management path provided by the current build.
+## 9. Safety
 
-Recommended approach for low-memory Android devices:
+Axtor checks commands before device execution. Dangerous operations are intentionally restricted, including arbitrary shell/root/ADB commands, unlocking or bypassing security, destructive device operations, credential/secret access, and disabling Android protections.
 
-- use a small quantized GGUF model;
-- keep context size moderate;
-- close other memory-heavy apps during inference;
-- keep sufficient free storage for the model.
+The repair, self-coding, self-modification, verification, activation, rollback, and component-lifecycle code provides an engineering foundation; it does **not** mean Axtor has unrestricted self-modifying or root access to Android.
 
-The APK does not automatically contain a large GGUF model unless that exact release lists one as an asset.
-
-## 8. Online AI
-
-The online router can use a configured API provider. The API key must be supplied by the user and is not hard-coded into the app.
-
-Internet AI is optional; local GGUF inference remains the offline path.
-
-## 9. Diagnostics
-
-Open **⋮ → Run voice diagnostics** to check microphone permission, speech-recognition availability, direct-command mode, and whether the voice service is running.
-
-The app also records its latest voice/service error in its local diagnostic preferences for troubleshooting.
-
-## 10. Safety and autonomy
-
-Axtor contains an agent, repair, self-coding, self-modification, verification, activation, rollback, and component-lifecycle architecture. These components are not equivalent to unrestricted self-modifying/root access on Android.
-
-Changes that could compromise Android security, credentials, or device protections are restricted by the command-security layer.
-
-## 11. If Axtor appears to close
+## 10. If Axtor appears to close
 
 1. Reopen Axtor.
-2. Check **Settings → Apps → Axtor → Permissions → Microphone**.
-3. Make sure the microphone permission is allowed.
-4. Tap **🎙**.
-5. Open **⋮ → Run voice diagnostics**.
-6. If voice still fails, disable snap commands temporarily and test normal voice mode.
+2. Check **Android Settings → Apps → Axtor → Permissions → Microphone**.
+3. Tap **🎙**.
+4. Open **⋮ → Diagnostics**.
+5. If voice fails, disable snap commands temporarily and test normal voice mode.
 
-## Quick setup checklist
+## Quick phone-test checklist
 
-- [ ] Microphone permission granted
-- [ ] ChatGPT-style interface opens
+- [ ] App launches into ChatGPT-style UI
+- [ ] Chat message sends successfully
+- [ ] New chat clears local conversation
+- [ ] Microphone permission works
 - [ ] 🎙 starts voice mode
-- [ ] Direct command works without a wake phrase
-- [ ] Optional personal snaps enrolled
-- [ ] Optional snap command mode enabled
-- [ ] Optional GGUF model imported
-- [ ] Optional online AI/API configured
-- [ ] Optional file workspace granted
-- [ ] Voice diagnostics reports the expected state
+- [ ] Direct voice command works without a wake phrase
+- [ ] GGUF import validates and selects a model
+- [ ] Active-model chooser works
+- [ ] Model status reports correctly
+- [ ] Optional online AI setup works
+- [ ] Personal snaps enroll successfully
+- [ ] 1/2/3/4-snap patterns behave as documented
+- [ ] File workspace can be granted
+- [ ] Diagnostics reports expected state
+- [ ] Android accessibility settings can be opened
+- [ ] App remains stable after background/foreground transitions
