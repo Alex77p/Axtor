@@ -14,7 +14,7 @@ import java.util.*;
 public class VoiceAssistantService extends Service implements RecognitionListener, TextToSpeech.OnInitListener {
   static final int ID=71;
   SpeechRecognizer recognizer; Intent recognizerIntent; TextToSpeech tts;
-  boolean running=false,ttsReady=false,awaitingSnapCommand=false;
+  boolean running=false,ttsReady=false,awaitingSnapCommand=false,enrolling=false;
   final Handler handler=new Handler(Looper.getMainLooper());
   boolean restartScheduled=false,onlineFallback=false,usingOnDevice=false; int consecutiveErrors=0;
   SnapTriggerEngine snapDetector;
@@ -28,26 +28,35 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,"voice"):new Notification.Builder(this);
     b.setContentTitle("Axtor voice assistant").setContentText(handsFreeModeText()).setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true).addAction(new Notification.Action.Builder(null,"Stop",pi).build());
     if(Build.VERSION.SDK_INT>=29)startForeground(ID,b.build(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);else startForeground(ID,b.build());
-    tts=new TextToSpeech(this,this);tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){public void onStart(String id){}public void onDone(String id){if(running&&continuousListening())armHandsFree();}public void onError(String id){if(running&&continuousListening())armHandsFree();}});
-    armHandsFree();
+    tts=new TextToSpeech(this,this);tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){public void onStart(String id){}public void onDone(String id){if(running&&continuousListening()&&!enrolling)armHandsFree();}public void onError(String id){if(running&&continuousListening()&&!enrolling)armHandsFree();}});
+    if(snapMode()&&!SnapTriggerEngine.isEnrolled(this))beginEnrollment();else armHandsFree();
   }
   private boolean continuousListening(){return getSharedPreferences("axtor_voice",0).getBoolean("continuous_listening",true);}
   private boolean snapMode(){return getSharedPreferences("axtor_voice",0).getBoolean("snap_trigger_enabled",true);}
   private String handsFreeModeText(){return snapMode()?"Hands-free: personalized snap trigger":"Hands-free: calling phrase";}
 
+  private void beginEnrollment(){
+    if(enrolling||!running)return;enrolling=true;pauseRecognition();
+    getSharedPreferences("axtor",0).edit().putString("voice_last_trigger","enrollment").putString("voice_last_error","").apply();
+    if(ttsReady)tts.speak("Snap three times. Use your normal finger snap, with a short pause between each snap. Axtor will learn this snap sound on this device.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-prompt");
+    new Thread(()->{
+      try{Thread.sleep(ttsReady?2600:500);}catch(Exception ignored){}
+      boolean ok=SnapTriggerEngine.enroll(this);
+      handler.post(()->{
+        enrolling=false;
+        if(ok){getSharedPreferences("axtor",0).edit().putString("voice_last_error","").apply();if(ttsReady)tts.speak("Snap pattern saved. I will ignore other sounds until your enrolled snap is detected.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-ok");armHandsFree();}
+        else{rememberVoiceError("SNAP_ENROLLMENT_FAILED");if(ttsReady)tts.speak("I could not learn three clear snaps. Please restart voice and try again in a quiet room.",TextToSpeech.QUEUE_FLUSH,null,"snap-enroll-fail");armHandsFree();}
+      });
+    },"AxtorSnapEnrollment").start();
+  }
+
   private void armHandsFree(){
-    if(!running||!continuousListening())return;
+    if(!running||!continuousListening()||enrolling)return;
     awaitingSnapCommand=false;
     if(snapMode()){
       pauseRecognition();
       if(snapDetector==null)snapDetector=new SnapTriggerEngine(this,new SnapTriggerEngine.Listener(){
-        public void onSnap(){
-          if(!running)return;
-          awaitingSnapCommand=true;
-          getSharedPreferences("axtor",0).edit().putString("voice_last_trigger","personalized_snap").apply();
-          if(snapDetector!=null)snapDetector.stop();
-          handler.postDelayed(()->startRecognition(),120);
-        }
+        public void onSnap(){if(!running)return;awaitingSnapCommand=true;getSharedPreferences("axtor",0).edit().putString("voice_last_trigger","personalized_snap").apply();if(snapDetector!=null)snapDetector.stop();handler.postDelayed(()->startRecognition(),120);}
         public void onDiagnostic(String m){rememberVoiceError(m);}
       });
       if(!SnapTriggerEngine.isEnrolled(this)){rememberVoiceError("SNAP_NOT_ENROLLED");return;}
@@ -68,10 +77,8 @@ public class VoiceAssistantService extends Service implements RecognitionListene
     try{recognizer.startListening(recognizerIntent);}catch(Exception e){rememberVoiceError("RECOGNIZER_START_FAILED:"+e.getClass().getSimpleName());scheduleRecognitionRestart(1200);}
   }
   String extractCommand(String q){return VoiceCommandManager.extractCommand(this,q);}
-
   void command(String q){
-    String cmd=awaitingSnapCommand?VoiceCommandManager.normalize(q):extractCommand(q);
-    awaitingSnapCommand=false;
+    String cmd=awaitingSnapCommand?VoiceCommandManager.normalize(q):extractCommand(q);awaitingSnapCommand=false;
     if(cmd==null||cmd.isEmpty()){if(!snapMode())say("Say your calling phrase followed by a command.");else say("I did not hear a command.");return;}
     getSharedPreferences("axtor",0).edit().putBoolean("voice_last_command_ok",true).apply();pauseRecognition();
     String searchQuery=WebSearchProtocol.extractQuery(cmd);
@@ -83,7 +90,7 @@ public class VoiceAssistantService extends Service implements RecognitionListene
   void say(String s){if(ttsReady&&tts!=null&&s!=null&&!s.isEmpty()){pauseRecognition();if(snapDetector!=null)snapDetector.stop();tts.speak(s,TextToSpeech.QUEUE_FLUSH,null,"axtor-"+System.nanoTime());}else if(running&&continuousListening())scheduleRecognitionRestart(500);}
   void scheduleRecognitionRestart(long delay){if(!running||!continuousListening()||restartScheduled)return;restartScheduled=true;handler.postDelayed(this::startRecognition,delay);}
   void sayResponse(String text){if(!ttsReady||tts==null||text==null||text.trim().isEmpty()){armHandsFree();return;}pauseRecognition();if(snapDetector!=null)snapDetector.stop();String[] parts=text.trim().split("(?<=[.!?])\\s+");String last="axtor-last-"+System.nanoTime();for(int i=0;i<parts.length;i++){String sentence=parts[i].trim();if(!sentence.isEmpty())tts.speak(sentence,TextToSpeech.QUEUE_ADD,null,i==parts.length-1?last:"axtor-"+System.nanoTime());}}
-  public int onStartCommand(Intent i,int f,int s){if(i!=null&&"STOP".equals(i.getAction())){getSharedPreferences("axtor",0).edit().putBoolean("voice_enabled",false).apply();getSharedPreferences("axtor_voice",0).edit().putBoolean("continuous_listening",false).apply();stopSelf();return START_NOT_STICKY;}running=true;VoiceServiceState.setRunning(true);if(recognizer==null&&snapDetector==null)armHandsFree();return START_STICKY;}
+  public int onStartCommand(Intent i,int f,int s){if(i!=null&&"STOP".equals(i.getAction())){getSharedPreferences("axtor",0).edit().putBoolean("voice_enabled",false).apply();getSharedPreferences("axtor_voice",0).edit().putBoolean("continuous_listening",false).apply();stopSelf();return START_NOT_STICKY;}running=true;VoiceServiceState.setRunning(true);if(recognizer==null&&snapDetector==null&&!enrolling)armHandsFree();return START_STICKY;}
   public void onDestroy(){running=false;if(snapDetector!=null){snapDetector.stop();snapDetector=null;}if(recognizer!=null){try{recognizer.cancel();recognizer.destroy();}catch(Exception ignored){}}recognizer=null;ttsReady=false;handler.removeCallbacksAndMessages(null);if(tts!=null){tts.stop();tts.shutdown();}VoiceServiceState.setRunning(false);super.onDestroy();}
   public android.os.IBinder onBind(Intent i){return null;}
   public void onInit(int status){ttsReady=status==TextToSpeech.SUCCESS;if(!ttsReady)rememberVoiceError("TTS_UNAVAILABLE");}
