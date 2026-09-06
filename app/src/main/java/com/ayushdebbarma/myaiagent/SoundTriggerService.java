@@ -22,8 +22,7 @@ public class SoundTriggerService extends Service {
     private double noiseFloor = 700.0;
 
     @Override public void onCreate() {
-        super.onCreate();
-        running = true;
+        super.onCreate(); running = true;
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             nm.createNotificationChannel(new NotificationChannel("sound_triggers", "Axtor Sound Triggers", NotificationManager.IMPORTANCE_LOW));
@@ -31,8 +30,7 @@ public class SoundTriggerService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, "sound_triggers") : new Notification.Builder(this);
         b.setContentTitle("Axtor sound triggers").setContentText("Listening for configured snap triggers")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true);
-        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, b.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
-        else startForeground(NOTIFICATION_ID, b.build());
+        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, b.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE); else startForeground(NOTIFICATION_ID, b.build());
         startDetector();
     }
 
@@ -47,8 +45,7 @@ public class SoundTriggerService extends Service {
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED) { recorder.release(); recorder = null; stopSelf(); return; }
             recorder.startRecording();
         } catch (Exception e) { stopSelf(); return; }
-        worker = new Thread(() -> detectLoop(), "AxtorSoundTrigger");
-        worker.start();
+        worker = new Thread(() -> detectLoop(), "AxtorSoundTrigger"); worker.start();
     }
 
     private void detectLoop() {
@@ -57,19 +54,12 @@ public class SoundTriggerService extends Service {
             int n;
             try { n = recorder.read(samples, 0, samples.length); } catch (Exception e) { break; }
             if (n <= 0) continue;
-            double sum = 0.0;
-            int peak = 0;
-            int zeroCrossings = 0;
-            short previous = samples[0];
+            double sum = 0.0; int peak = 0; int zeroCrossings = 0; short previous = samples[0];
             for (int i = 0; i < n; i++) {
-                int v = Math.abs((int) samples[i]);
-                sum += (double) samples[i] * samples[i];
-                if (v > peak) peak = v;
-                if ((previous < 0 && samples[i] >= 0) || (previous >= 0 && samples[i] < 0)) zeroCrossings++;
-                previous = samples[i];
+                int v = Math.abs((int) samples[i]); sum += (double) samples[i] * samples[i]; if (v > peak) peak = v;
+                if ((previous < 0 && samples[i] >= 0) || (previous >= 0 && samples[i] < 0)) zeroCrossings++; previous = samples[i];
             }
-            double rms = Math.sqrt(sum / n);
-            double zcr = (double) zeroCrossings / Math.max(1, n);
+            double rms = Math.sqrt(sum / n); double zcr = (double) zeroCrossings / Math.max(1, n);
             if (rms < noiseFloor * 1.6) noiseFloor = noiseFloor * 0.98 + rms * 0.02;
             double threshold = Math.max(1400.0, noiseFloor * 3.2);
             if (rms > threshold && peak > 6000 && zcr > 0.16) registerSnap();
@@ -78,24 +68,32 @@ public class SoundTriggerService extends Service {
 
     private void registerSnap() {
         long now = System.currentTimeMillis();
-        if (now - lastSnapAt < 220 || now - lastActionAt < 500) return;
-        lastSnapAt = now;
-        snapCount++;
-        final int count = snapCount;
+        if (now - lastSnapAt < 180 || now - lastActionAt < 500) return;
+        lastSnapAt = now; snapCount = Math.min(4, snapCount + 1); final int count = snapCount;
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (snapCount != count) return;
             snapCount = 0;
-            executeConfiguredAction(count >= 2 ? "double" : "single");
-        }, 700);
+            executeConfiguredAction(count >= 4 ? "quad" : count == 3 ? "triple" : count == 2 ? "double" : "single");
+        }, 750);
     }
 
     private void executeConfiguredAction(String type) {
         if (!running) return;
         lastActionAt = System.currentTimeMillis();
         android.content.SharedPreferences p = getSharedPreferences("axtor_sound", 0);
-        String fallback = type.equals("single") ? "lock screen" : "volume down";
+        String fallback;
+        if (type.equals("single")) fallback = "wake screen";
+        else if (type.equals("double")) fallback = "volume down";
+        else if (type.equals("triple")) fallback = "open settings";
+        else fallback = "open notification settings";
         String action = p.getString(type + "_action", fallback).trim();
         if (action.isEmpty()) return;
+
+        // Optional screen-off wake happens before the configured custom action.
+        if (p.getBoolean("wake_on_screen_off", true)) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null && !pm.isInteractive()) DeviceAutomation.execute(this, "wake screen");
+        }
         String result = DeviceAutomation.execute(this, action);
         p.edit().putString("last_trigger", type + ":" + action).putString("last_result", result == null ? "unsupported" : result).apply();
     }
@@ -111,6 +109,5 @@ public class SoundTriggerService extends Service {
         if (worker != null) { worker.interrupt(); worker = null; }
         super.onDestroy();
     }
-
     @Override public IBinder onBind(Intent intent) { return null; }
 }
